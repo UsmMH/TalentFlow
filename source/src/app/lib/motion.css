@@ -1,0 +1,52 @@
+/* Shared motion. Subtle, fast, and off for people who ask for reduced motion. */
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { 0% { opacity: 0; transform: scale(0.9); } 60% { transform: scale(1.03); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes slideEnd { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes slideStart { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes flash { 0%, 100% { background-color: #eef5f1; } 40% { background-color: #ddf5e9; } }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+.reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.reveal.in { opacity: 1; transform: none; }
+
+/* logo draws itself once */
+.logo-draw { stroke-dasharray: 1; animation: draw 0.9s ease 0.1s backwards; }
+.logo-dot { transform-box: fill-box; transform-origin: center; animation: pop 0.5s ease backwards; }
+.logo-dot.b { animation-delay: 0.7s; }
+
+/* ---- App ---- */
+.page > * { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+.page > *:nth-child(2) { animation-delay: 0.06s; } .page > *:nth-child(3) { animation-delay: 0.12s; }
+.page > *:nth-child(4) { animation-delay: 0.18s; } .page > *:nth-child(5) { animation-delay: 0.24s; } .page > *:nth-child(n+6) { animation-delay: 0.3s; }
+.page .grid > * { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+.page .grid > *:nth-child(1) { animation-delay: 0.1s; } .page .grid > *:nth-child(2) { animation-delay: 0.18s; }
+.page .grid > *:nth-child(3) { animation-delay: 0.26s; } .page .grid > *:nth-child(n+4) { animation-delay: 0.34s; }
+tbody tr { animation: rise 0.4s ease backwards; }
+tbody tr:nth-child(2) { animation-delay: 0.08s; } tbody tr:nth-child(3) { animation-delay: 0.16s; } tbody tr:nth-child(4) { animation-delay: 0.24s; } tbody tr:nth-child(n+5) { animation-delay: 0.32s; }
+tbody tr.flash-row { animation: rise 0.4s ease 0.08s backwards, flash 1.6s ease 0.7s 1; }
+.card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.page .grid > .card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(7, 59, 46, 0.08); }
+button, a { transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease, border-color 0.15s ease; }
+button:active { transform: scale(0.97); }
+
+.bar-fill { transform-origin: left; animation: grow 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s backwards; }
+[dir="rtl"] .bar-fill, [dir="rtl"] .flow-line { transform-origin: right; }
+.flow-line { transform-origin: left; animation: grow 0.5s ease backwards; }
+.flow-dot { animation: pop 0.4s ease backwards; }
+.flow-text { animation: rise 0.5s ease backwards; }
+
+.sheet-back, .dialog-back { animation: fade 0.2s ease; }
+.sheet-panel { animation: slideEnd 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
+[dir="rtl"] .sheet-panel { animation-name: slideStart; }
+.dialog-panel, .pop { animation: pop 0.35s ease backwards; }
+@media (max-width: 1023px) { .nav-in { animation: up 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; } }
+
+/* Reduced motion: keep gentle fades only, no movement or scaling. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-name: fade !important; animation-duration: 0.4s !important; animation-iteration-count: 1 !important; transition-property: opacity, background-color, color, border-color !important; }
+  .reveal { opacity: 1; transform: none; }
+}
