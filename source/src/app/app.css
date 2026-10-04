@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@theme {
+  --color-ink: #073b2e;
+  --color-mint: #3ddc97;
+  --color-flow: #0b6b4f;
+  --color-mist: #eef5f1;
+  --color-i900: #0f2a22;
+  --color-i700: #2a4a40;
+  --color-i500: #4f6b75;
+  --color-i300: #a9bdb5;
+  --color-i100: #dce8e1;
+  --font-sans: "IBM Plex Sans Arabic", "Manrope", sans-serif;
+  --font-num: "Manrope", sans-serif;
+}
+html[lang="en"] body { font-family: "Manrope", sans-serif; }
+body { margin: 0; background: var(--color-mist); color: var(--color-i900); font-size: 16px; }
+button { cursor: pointer; font: inherit; }
