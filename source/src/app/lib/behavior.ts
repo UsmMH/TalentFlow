@@ -1,7 +1,21 @@
-// Behavioral readiness. Scores come only from confirmed ratings via §6 rules — never hard-coded in the UI.
+// Behavioral readiness UI helpers + demo data. Scoring lives in @shared/engine (ONE engine).
 import { b, type B } from "./demo-data.ts"
 import { PROMOTION_COST as P } from "./assumptions.ts"
 import type { Explain } from "./explain.ts"
+import {
+  SOURCE_WEIGHTS,
+  TEAM_MANAGER_REQUIREMENTS,
+  behaviorScore,
+  behaviorLevel as floorLevel,
+  readiness as engineReadiness,
+  emptyRatings as engineEmptyRatings,
+  type BehaviorSourceScores,
+  type PathKey,
+  type RatingsByBehavior,
+  type RoleRequirement,
+  type ScoreSource,
+} from "@shared/engine.ts"
+import type { Confidence } from "@shared/types.ts"
 
 export type BId = "delegation" | "coaching" | "accountability" | "fairness" | "conflict" | "communication"
 export const BEHAVIOR_IDS: BId[] = ["delegation", "coaching", "accountability", "fairness", "conflict", "communication"]
@@ -73,18 +87,11 @@ export const BEHAVIORS: Record<BId, { name: B; anchor: B; rubric: Rubric }> = {
 }
 
 export const ROLE = b("مدير فريق", "Team Manager")
-/** §6.7 Team Manager requirements — weights sum to 100 */
-export const ROLE_REQ: { id: BId; required: number; weight: number; critical: boolean }[] = [
-  { id: "delegation", required: 75, weight: 20, critical: true },
-  { id: "coaching", required: 75, weight: 20, critical: false },
-  { id: "accountability", required: 75, weight: 15, critical: false },
-  { id: "fairness", required: 75, weight: 15, critical: false },
-  { id: "conflict", required: 50, weight: 15, critical: false },
-  { id: "communication", required: 75, weight: 15, critical: false },
-]
+/** §6.7 Team Manager — from shared/policy (single source of truth) */
+export const ROLE_REQ: RoleRequirement[] = TEAM_MANAGER_REQUIREMENTS
 
 /** Scored sources only (§6.2). Self is never included in the score. */
-export type ScoreSource = "manager" | "peer" | "document"
+export type { ScoreSource }
 export type Rater = ScoreSource | "self"
 export const RATER_NAME: Record<Rater, B> = {
   manager: b("المدير", "Manager"),
@@ -92,15 +99,17 @@ export const RATER_NAME: Record<Rater, B> = {
   document: b("مستند", "Document"),
   self: b("الموظف نفسه", "Self"),
 }
-export const RATER_W: Record<ScoreSource, number> = { manager: 0.45, peer: 0.35, document: 0.2 }
+export const RATER_W: Record<ScoreSource, number> = { ...SOURCE_WEIGHTS }
 
-export type Rating = Record<Rater, number | null>
-export type Ratings = Record<BId, Rating>
+export type Rating = BehaviorSourceScores
+export type Ratings = RatingsByBehavior
 export type EvidenceQuote = { text: B; source: Rater | "retro"; confirmed: boolean }
 
 export type Employee = {
   id: string
   slug: string
+  /** Supabase UUID when loaded from DB (needed for writes). */
+  uuid?: string
   name: B
   role: B
   department?: B
@@ -110,9 +119,7 @@ export type Employee = {
   ratingDates?: string[]
 }
 
-const emptyRating = (): Rating => ({ manager: null, peer: null, document: null, self: null })
-export const emptyRatings = (): Ratings =>
-  Object.fromEntries(BEHAVIOR_IDS.map((id) => [id, emptyRating()])) as Ratings
+export const emptyRatings = (): Ratings => engineEmptyRatings()
 
 const r = (m: number | null, p: number | null, d: number | null, s: number | null): Rating =>
   ({ manager: m, peer: p, document: d, self: s })
@@ -212,108 +219,20 @@ export const EMPLOYEES: Employee[] = [
 export const emp = (idOrSlug: string) =>
   EMPLOYEES.find((e) => e.id === idOrSlug || e.slug === idOrSlug) ?? EMPLOYEES[0]
 
-/* ---- scoring (§6) ---- */
+/* ---- scoring: re-export ONE engine from shared/ ---- */
 const SCORE_SOURCES: ScoreSource[] = ["manager", "peer", "document"]
 
-/** Confirmed others-only weighted score. Self excluded. */
-export function behaviorScore(x: Rating): number | null {
-  const present = SCORE_SOURCES.filter((k) => x[k] !== null)
-  if (!present.length) return null
-  const w = present.reduce((s, k) => s + RATER_W[k], 0)
-  return Math.round((present.reduce((s, k) => s + x[k]! * RATER_W[k], 0) / w) * 100) / 100
-}
-
-/** Display anchor: floor continuous score to 25/50/75/100 (below 25 → 0 shown as null-ish via LevelLabel). */
-export const behaviorLevel = (x: Rating) => {
-  const a = behaviorScore(x)
-  return a === null ? null : Math.floor(a / 25) * 25
-}
-
-export type Confidence = "high" | "medium" | "low" | "not_assessed"
-
-export function behaviorConfidence(x: Rating, ratingDates: string[] = []): Confidence {
-  const present = SCORE_SOURCES.filter((k) => x[k] !== null)
-  if (!present.length) return "not_assessed"
-  const individualRatings = present.length // one aggregated rating per source in our seed
-  const stale = ratingDates.some((d) => {
-    const ageMs = Date.now() - new Date(d).getTime()
-    return ageMs > 365 * 24 * 60 * 60 * 1000
-  })
-  if (stale) return "low"
-  if (present.length >= 3 || (present.length >= 2 && individualRatings >= 3)) return "high"
-  // With one row per source, 2 sources + need 3 ratings: treat 2 sources as medium; 3 sources as high.
-  if (present.length >= 2) return "medium"
-  return "low"
-}
-
-export type PathKey = "now" | "develop" | "specialist" | "insufficient"
+export { behaviorScore }
+export type { Confidence, PathKey }
+export const behaviorLevel = (x: Rating) => floorLevel(behaviorScore(x))
+export const behaviorAverage = behaviorScore
 
 export function readiness(
   ratings: Ratings,
   ratingDates: string[] = [],
-  roleReqs: typeof ROLE_REQ = ROLE_REQ,
+  roleReqs: RoleRequirement[] = ROLE_REQ,
 ) {
-  const totalWeight = roleReqs.reduce((s, q) => s + q.weight, 0)
-  const parts = roleReqs.map((q) => {
-    const rt = ratings[q.id]
-    const score = behaviorScore(rt)
-    const others = SCORE_SOURCES.map((k) => rt[k]).filter((v): v is number => v !== null)
-    const othersAvg = others.length ? others.reduce((s, v) => s + v, 0) / others.length : null
-    const conf = behaviorConfidence(rt, ratingDates)
-    const status =
-      score === null ? "notAssessed" as const
-        : score >= q.required ? "met" as const
-          : q.critical ? "critical" as const
-            : "partial" as const
-    const fulfilment = score === null ? 0 : Math.min(score / q.required, 1)
-    return {
-      ...q,
-      cur: score,
-      level: score === null ? null : Math.floor(score / 25) * 25,
-      status,
-      conf,
-      raters: SCORE_SOURCES.filter((k) => rt[k] !== null).length + (rt.self !== null ? 1 : 0),
-      sourceCount: SCORE_SOURCES.filter((k) => rt[k] !== null).length,
-      contribution: fulfilment * q.weight,
-      blind: rt.self !== null && othersAvg !== null && rt.self - othersAvg >= 25,
-      under: rt.self !== null && othersAvg !== null && rt.self - othersAvg <= -25,
-      thin: SCORE_SOURCES.filter((k) => rt[k] !== null).length < 2,
-    }
-  })
-
-  const assessed = parts.filter((p) => p.cur !== null)
-  const assessedWeight = assessed.reduce((s, p) => s + p.weight, 0)
-  const coverage = totalWeight === 0 ? 0 : assessedWeight / totalWeight
-  const exact = assessedWeight === 0 ? 0 : (assessed.reduce((s, p) => s + p.contribution, 0) / assessedWeight) * 100
-  const criticalMissing = parts.filter((p) => p.status === "critical")
-  const criticalShortfallOk = criticalMissing.every((p) => p.cur !== null && p.required - p.cur! <= 25)
-
-  const confs = assessed.map((p) => p.conf)
-  const overallConfidence: Confidence =
-    assessed.length === 0 ? "not_assessed"
-      : confs.includes("low") ? "low"
-        : confs.includes("medium") ? "medium"
-          : "high"
-
-  let path: PathKey
-  if (coverage < 0.5) path = "insufficient"
-  else if (exact >= 85 && criticalMissing.length === 0 && overallConfidence !== "low") path = "now"
-  else if (exact >= 60 && criticalShortfallOk) path = "develop"
-  else path = "specialist"
-
-  // UI still uses high/low badges in places — map medium → high for the old dual badge
-  const confidence: "high" | "low" = overallConfidence === "low" || overallConfidence === "not_assessed" ? "low" : "high"
-
-  return {
-    parts,
-    exact: Math.round(exact * 100) / 100,
-    rounded: Math.round(exact),
-    coverage,
-    criticalMissing,
-    confidence,
-    overallConfidence,
-    path,
-  }
+  return engineReadiness(ratings, ratingDates, roleReqs)
 }
 
 export const PATH_NAME: Record<PathKey, B> = {
@@ -376,6 +295,4 @@ export function explainBehavior(e: Employee, id: BId): Explain {
   }
 }
 
-/** Compat alias used by older call sites */
-export const behaviorAverage = behaviorScore
 export const AHMAD_EVIDENCE: Partial<Record<BId, EvidenceQuote[]>> = emp("ahmad").evidence ?? {}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { b } from "./demo-data"
 import {
   BEHAVIOR_IDS,
@@ -26,7 +26,10 @@ type Store = {
   roleReqs: RoleReq
   behaviors: Record<BId, BehaviorMeta>
   emp: (slug: string) => Employee
+  reload: () => Promise<void>
 }
+
+const noopReload = async () => {}
 
 const LOCAL: Store = {
   loading: false,
@@ -38,6 +41,7 @@ const LOCAL: Store = {
     BEHAVIOR_IDS.map((id) => [id, { id, name: BEHAVIORS[id].name, anchor: BEHAVIORS[id].anchor, rubric: BEHAVIORS[id].rubric }]),
   ) as Record<BId, BehaviorMeta>,
   emp: (slug) => EMPLOYEES.find((e) => e.slug === slug || e.id === slug) ?? EMPLOYEES[0],
+  reload: noopReload,
 }
 
 const Ctx = createContext<Store>(LOCAL)
@@ -68,7 +72,7 @@ type DbRating = {
 }
 type DbSubmission = { id: string; employee_id: string; rater_type: string }
 
-async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp">> {
+async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp" | "reload">> {
   const sb = supabase!
   const [emps, behs, role, reqs, ratings, submissions] = await Promise.all([
     sb.from("employees").select("id,slug,full_name_en,full_name_ar,title_en,title_ar,department_en,department_ar").order("full_name_en"),
@@ -110,7 +114,6 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp">> {
     .filter((q) => q.id)
     .sort((a, z) => BEHAVIOR_IDS.indexOf(a.id) - BEHAVIOR_IDS.indexOf(z.id)) as RoleReq
 
-  // Average confirmed ratings per (employee, behavior, rater_type)
   const buckets = new Map<string, { sum: number; n: number; examples: EvidenceQuote[]; dates: string[] }>()
   for (const row of (ratings.data ?? []) as DbRating[]) {
     const sub = subById[row.submission_id]
@@ -151,6 +154,7 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp">> {
     return {
       id: e.slug,
       slug: e.slug,
+      uuid: e.id,
       name: b(e.full_name_ar ?? e.full_name_en, e.full_name_en),
       role: b(e.title_ar ?? e.title_en ?? "", e.title_en ?? ""),
       department: b(e.department_ar ?? e.department_en ?? "", e.department_en ?? ""),
@@ -160,7 +164,6 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp">> {
     }
   })
 
-  // Prefer DB role reqs when present; else keep local §6.7 constants
   return {
     source: "supabase",
     error: null,
@@ -173,6 +176,25 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp">> {
 export function BehaviorDataProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<Store>({ ...LOCAL, loading: supabaseConfigured })
 
+  const applyData = useCallback((data: Omit<Store, "loading" | "emp" | "reload">, reload: () => Promise<void>) => {
+    setStore({
+      ...data,
+      loading: false,
+      emp: (slug) => data.employees.find((e) => e.slug === slug || e.id === slug) ?? data.employees[0] ?? LOCAL.employees[0],
+      reload,
+    })
+  }, [])
+
+  const reload = useCallback(async () => {
+    if (!supabaseConfigured) return
+    try {
+      const data = await fetchFromSupabase()
+      applyData(data, reload)
+    } catch (err) {
+      console.warn("Supabase reload failed", err)
+    }
+  }, [applyData])
+
   useEffect(() => {
     if (!supabaseConfigured) return
     let cancelled = false
@@ -180,11 +202,7 @@ export function BehaviorDataProvider({ children }: { children: ReactNode }) {
       try {
         const data = await fetchFromSupabase()
         if (cancelled) return
-        setStore({
-          ...data,
-          loading: false,
-          emp: (slug) => data.employees.find((e) => e.slug === slug || e.id === slug) ?? data.employees[0] ?? LOCAL.employees[0],
-        })
+        applyData(data, reload)
       } catch (err) {
         if (cancelled) return
         console.warn("Supabase load failed; using local §6 fallback", err)
@@ -192,11 +210,12 @@ export function BehaviorDataProvider({ children }: { children: ReactNode }) {
           ...LOCAL,
           loading: false,
           error: err instanceof Error ? err.message : "Failed to load from Supabase",
+          reload,
         })
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [applyData, reload])
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>
 }

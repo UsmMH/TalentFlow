@@ -1,0 +1,21 @@
+{
+  "name": "talentflow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:skills": "npm run test --prefix source",
+    "test:llm": "npx --yes tsx --env-file=.env.local scripts/test-llm.ts",
+    "typecheck": "tsc -p tsconfig.shared.json --noEmit && tsc -p source/tsconfig.json --noEmit && tsc -p tsconfig.api.json --noEmit",
+    "build": "npm run build --prefix source"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vercel/node": "^5.1.16",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.9"
+  }
+}

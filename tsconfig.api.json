@@ -3,16 +3,15 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "baseUrl": ".",
-    "paths": {
-      "@shared/*": ["../shared/*"]
-    }
+    "lib": ["ES2022"],
+    "types": ["node"]
   },
-  "include": ["src", "../shared"]
+  "include": ["api/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["shared/**/*.test.ts"]
 }

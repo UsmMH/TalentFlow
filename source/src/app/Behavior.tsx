@@ -4,6 +4,8 @@ import { useApp } from "./lib/i18n"
 import { PROMOTION_COST as P } from "./lib/assumptions.ts"
 import { PATH_NAME, RATER_NAME, ROLE, explainBehavior, explainReadiness, readiness, whatIf, type BId, type Rater } from "./lib/behavior.ts"
 import { useBehaviorData } from "./lib/behavior-data"
+import { postJson } from "./lib/api"
+import { supabase, supabaseConfigured } from "./lib/supabase"
 import { Btn, Card, Dialog, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge, type Variant } from "./ui"
 
 const B = "/app/behavior"
@@ -194,39 +196,160 @@ export function Analysis() {
 }
 
 /* ============ Rating form + feedback reading ============ */
-const SAMPLE = "في مشروع التقارير الربعية أعاد أحمد كتابة التقرير بنفسه بدل أن يتركه لزميله. شرح لسارة طريقة عرض النتائج وتابع تحسّنها أسبوعياً. ويؤجّل الحديث عن الخلاف حتى يهدأ الجميع."
-const RULES: { id: BId; test: RegExp; low: RegExp }[] = [
-  { id: "delegation", test: /بنفسه|يفوّض|يفوض|يترك/, low: /بنفسه/ },
-  { id: "coaching", test: /شرح|يوجّه|يوجه|يدرّب|ملاحظات/, low: /^$/ },
-  { id: "conflict", test: /خلاف|توتر|نزاع/, low: /يؤجّل|يؤجل|يتجنب/ },
-]
+const SAMPLE_AR =
+  "يقدّم أحمد تحليلاً ممتازاً ونادراً ما يفوّت موعداً. عندما يسلّم أعضاء الفريق عملهم، غالباً ما يعيد إنجازه بنفسه طوال الليل بدل إعطاء ملاحظات. تحمّل المسؤولية عندما تعطّلت لوحة المعلومات في الربع الماضي. في خلاف حول الأولويات صمت وبقيت المسألة دون حل لأسابيع."
+const SAMPLE_EN =
+  "Ahmed delivers excellent analysis and rarely misses a deadline. When team members hand in their work, he often redoes it himself overnight instead of giving feedback. He took ownership when the dashboard failed last quarter. In a disagreement about priorities he went quiet and the issue stayed unresolved for weeks."
+
+type AiProposal = {
+  id: string
+  behavior_key: BId
+  level: number
+  quote: string
+  rationale: string
+  ok: boolean | null
+}
 
 export function RateForm() {
-  const { tr, bi } = useApp()
+  const { tr, bi, lang } = useApp()
   const data = useBehaviorData()
+  const nav = useNavigate()
   const [rater, setRater] = useState<Rater>("manager")
   const [bid, setBid] = useState<BId>("delegation")
   const [level, setLevel] = useState(50)
   const [example, setExample] = useState("")
   const [error, setError] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [text, setText] = useState(SAMPLE)
-  const [phase, setPhase] = useState<"idle" | "loading" | "done">("idle")
-  const [found, setFound] = useState<{ id: BId; level: number; quote: string; ok: boolean | null }[]>([])
+  const [text, setText] = useState(lang === "ar" ? SAMPLE_AR : SAMPLE_EN)
+  const [phase, setPhase] = useState<"idle" | "loading" | "done" | "error">("idle")
+  const [found, setFound] = useState<AiProposal[]>([])
+  const [aiError, setAiError] = useState<string | null>(null)
   const chip = (on: boolean) => `rounded-full border px-3 py-2 text-sm font-bold ${on ? "border-flow bg-flow text-white" : "border-i100 bg-white text-i700"}`
 
-  const submit = () => {
+  const employee = data.emp("ahmad")
+
+  const submitManual = async () => {
     if (!example.trim()) return setError(true)
-    setError(false); setSaved(true); setExample("")
+    setError(false)
+    if (supabaseConfigured && supabase && employee.uuid) {
+      const { data: behs } = await supabase.from("behaviors").select("id,key")
+      const behaviorId = (behs ?? []).find((x) => x.key === bid)?.id
+      if (behaviorId) {
+        const { data: sub, error: subErr } = await supabase
+          .from("feedback_submissions")
+          .insert({
+            employee_id: employee.uuid,
+            rater_type: rater === "peer" ? "peer" : rater,
+            rater_name: "Demo rater",
+            free_text: null,
+            language: lang,
+          })
+          .select("id")
+          .single()
+        if (!subErr && sub) {
+          await supabase.from("behavior_ratings").insert({
+            submission_id: sub.id,
+            employee_id: employee.uuid,
+            behavior_id: behaviorId,
+            level,
+            example: example.trim(),
+            source: "human",
+            status: "confirmed",
+          })
+          await data.reload()
+        }
+      }
+    }
+    setSaved(true)
+    setExample("")
   }
-  const analyze = () => {
+
+  const analyze = async () => {
+    setAiError(null)
+    setFound([])
+    if (!text.trim()) {
+      setAiError(tr("أضف نص الملاحظات أولاً.", "Add feedback text first."))
+      setPhase("error")
+      return
+    }
+    if (!supabaseConfigured || !supabase || !employee.uuid) {
+      setAiError(tr(
+        "يلزم اتصال قاعدة البيانات لاقتراحات الذكاء الاصطناعي. يمكنك إدخال تقييم يدوي أعلاه.",
+        "Database connection is required for AI suggestions. You can still add a manual rating above.",
+      ))
+      setPhase("error")
+      return
+    }
+
     setPhase("loading")
-    setTimeout(() => {
-      const sentences = text.split(/[.؛\n]/).map((s) => s.trim()).filter(Boolean)
-      const out = RULES.flatMap((r) => sentences.filter((s) => r.test.test(s)).map((s) => ({ id: r.id, level: r.low.test(s) ? 25 : 75, quote: s, ok: null as boolean | null })))
-      setFound(out); setPhase("done")
-    }, 1200)
+    const language = /[\u0600-\u06FF]/.test(text) ? "ar" : "en"
+    const { data: sub, error: subErr } = await supabase
+      .from("feedback_submissions")
+      .insert({
+        employee_id: employee.uuid,
+        rater_type: rater === "peer" ? "peer" : rater,
+        rater_name: "Demo rater",
+        free_text: text.trim(),
+        language,
+      })
+      .select("id")
+      .single()
+
+    if (subErr || !sub) {
+      setAiError(tr("تعذّر حفظ الملاحظات. جرّب التقييم اليدوي.", "Could not save the feedback. Try a manual rating."))
+      setPhase("error")
+      return
+    }
+
+    const result = await postJson<{
+      saved: { id: string; behavior_key: string; level: number; quote: string; rationale: string }[]
+      dropped: { reason: string }[]
+    }>("/api/interpret-feedback", { submission_id: sub.id }, { timeoutMs: 20_000 })
+
+    if (!result.ok) {
+      const timedOut = result.error === "timeout"
+      setAiError(
+        timedOut
+          ? tr(
+            "استغرق التفسير أكثر من 20 ثانية. أضف تقييماً يدوياً بالمثال أعلاه، أو أعد المحاولة لاحقاً.",
+            "Interpretation took longer than 20 seconds. Add a manual rating with an example above, or try again later.",
+          )
+          : tr(
+            `تعذّر تفسير النص (${result.error}). يمكنك إدخال تقييم يدوي بالمثال أعلاه.`,
+            `Could not interpret the text (${result.error}). You can add a manual rating with an example above.`,
+          ),
+      )
+      setPhase("error")
+      return
+    }
+
+    setFound(
+      result.data.saved.map((p) => ({
+        id: p.id,
+        behavior_key: p.behavior_key as BId,
+        level: p.level,
+        quote: p.quote,
+        rationale: p.rationale,
+        ok: null,
+      })),
+    )
+    setPhase("done")
   }
+
+  const confirmOrReject = async (ratingId: string, action: "confirm" | "reject", index: number) => {
+    const result = await postJson<{ status: string }>("/api/ratings-confirm", { rating_id: ratingId, action }, { timeoutMs: 15_000 })
+    if (!result.ok) {
+      setAiError(tr("تعذّر تحديث الاقتراح.", "Could not update the suggestion."))
+      return
+    }
+    if (action === "reject") {
+      setFound((rows) => rows.filter((_, j) => j !== index))
+    } else {
+      setFound((rows) => rows.map((x, j) => (j === index ? { ...x, ok: true } : x)))
+      await data.reload()
+    }
+  }
+
   return (
     <>
       <PageTitle sub={tr("كل تقييم يحتاج مثالاً ملموساً. لا نستنتج السلوك من البريد أو المحادثات.", "Every rating needs a concrete example. We never infer behavior from emails or chats.")}>{tr("تقييم سلوكي", "Behavior rating")}</PageTitle>
@@ -241,23 +364,51 @@ export function RateForm() {
           <textarea value={example} onChange={(ev) => setExample(ev.target.value)} rows={3} placeholder={tr("مثال: في اجتماع الأسبوع الماضي…", "For example: in last week's meeting…")} className="rounded-[12px] border border-i100 bg-white p-3 text-base font-normal text-i900" />
         </label>
         {error && <p role="alert" className="m-0 text-sm font-bold text-i900">{tr("أضف مثالاً ملموساً قبل الحفظ.", "Add a concrete example before saving.")}</p>}
-        {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم (بيانات تجريبية)", "Rating added (sample data)")} />}
-        <Btn className="self-start" onClick={submit}>{tr("حفظ التقييم", "Save rating")}</Btn>
+        {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم", "Rating saved")} />}
+        <Btn className="self-start" onClick={() => void submitManual()}>{tr("حفظ التقييم", "Save rating")}</Btn>
       </Card>
 
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("قراءة الملاحظات النصية", "Reading free-text feedback")}</h2>
       <Card className="mb-6 flex flex-col gap-4 p-6">
-        <textarea value={text} onChange={(ev) => setText(ev.target.value)} rows={4} className="rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900" aria-label={tr("ملاحظات المشروع", "Project feedback")} />
-        <Btn className="self-start" onClick={analyze}>{tr("اقترح تقييمات من النص", "Suggest ratings from the text")}</Btn>
-        {phase === "loading" && <div className="flex flex-col gap-2" role="status"><b>{tr("جارٍ قراءة النص…", "Reading the text…")}</b><Skeleton className="h-12" /><Skeleton className="h-12" /></div>}
-        {phase === "done" && found.length === 0 && <p className="m-0 text-base text-i700">{tr("لم نجد أدلة كافية في هذا النص.", "We found no usable evidence in this text.")}</p>}
+        <textarea value={text} onChange={(ev) => setText(ev.target.value)} rows={5} className="rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900" aria-label={tr("ملاحظات المشروع", "Project feedback")} />
+        <Btn className="self-start" disabled={phase === "loading"} onClick={() => void analyze()}>{tr("اقترح تقييمات من النص", "Suggest ratings from the text")}</Btn>
+        {phase === "loading" && (
+          <div className="flex flex-col gap-2" role="status">
+            <b>{tr("جارٍ تفسير النص بالذكاء الاصطناعي… (قد يستغرق حتى 20 ثانية)", "Interpreting with AI… (may take up to 20 seconds)")}</b>
+            <Skeleton className="h-12" /><Skeleton className="h-12" />
+          </div>
+        )}
+        {aiError && (
+          <div role="alert" className="rounded-[12px] border border-i100 bg-mist p-4 text-sm leading-[1.7] text-i900">
+            <p className="m-0 mb-2">{aiError}</p>
+            <p className="m-0 text-i500">{tr("البديل: استخدم نموذج التقييم اليدوي أعلاه بمثال ملموس.", "Fallback: use the manual rating form above with a concrete example.")}</p>
+          </div>
+        )}
+        {phase === "done" && found.length === 0 && !aiError && (
+          <p className="m-0 text-base text-i700">{tr("لم نجد أدلة كافية قابلة للتحقق في هذا النص.", "We found no verifiable evidence in this text.")}</p>
+        )}
         {found.map((f, i) => (
-          <div key={i} className="flex flex-col gap-2 rounded-[12px] bg-mist p-4">
-            <div className="flex flex-wrap items-center gap-2"><b className="text-base text-ink">{bi(data.behaviors[f.id].name)}</b><span className="text-sm text-i700">{tr("المستوى المقترح", "Suggested level")}: <LevelLabel level={f.level} /></span><AiTag confirmed={f.ok === true} /></div>
+          <div key={f.id} className="flex flex-col gap-2 rounded-[12px] bg-mist p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <b className="text-base text-ink">{bi(data.behaviors[f.behavior_key]?.name ?? { ar: f.behavior_key, en: f.behavior_key })}</b>
+              <span className="text-sm text-i700">{tr("المستوى المقترح", "Suggested level")}: <LevelLabel level={f.level} /></span>
+              <AiTag confirmed={f.ok === true} />
+            </div>
             <p className="m-0 text-sm leading-[1.7] text-i900">«{f.quote}»</p>
+            {f.rationale && <p className="m-0 text-sm leading-[1.7] text-i700">{f.rationale}</p>}
             {f.ok === null ? (
-              <div className="flex gap-2"><Btn className="px-4 py-2 text-sm" onClick={() => setFound(found.map((x, j) => (j === i ? { ...x, ok: true } : x)))}>{tr("تأكيد", "Confirm")}</Btn><Btn kind="outline" className="px-4 py-2 text-sm" onClick={() => setFound(found.filter((_, j) => j !== i))}>{tr("رفض", "Reject")}</Btn></div>
-            ) : <span className="text-sm font-bold text-flow">{tr("أُضيف إلى الملف بعد التأكيد (بيانات تجريبية)", "Added to the profile after confirmation (sample data)")}</span>}
+              <div className="flex flex-wrap gap-2">
+                <Btn className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "confirm", i)}>{tr("تأكيد", "Confirm")}</Btn>
+                <Btn kind="outline" className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "reject", i)}>{tr("رفض", "Reject")}</Btn>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-bold text-flow">{tr("أُضيف إلى الملف بعد التأكيد", "Added to the profile after confirmation")}</span>
+                <button type="button" className="border-0 bg-transparent p-0 text-sm font-bold text-flow underline" onClick={() => nav("/app/behavior/ahmad")}>
+                  {tr("عرض الملف", "View profile")}
+                </button>
+              </div>
+            )}
           </div>
         ))}
         <p className="m-0 text-sm leading-[1.7] text-i500">{tr("الاقتراحات تبقى «بانتظار التأكيد» حتى يراجعها شخص. الدرجات تأتي من قواعد معلنة، ولا يخترع النظام رقماً.", "Suggestions stay \"awaiting confirmation\" until a person reviews them. Scores come from declared rules; the system never invents a number.")}</p>
