@@ -77,7 +77,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const llm = await chatJson<{ proposals?: InterpretProposal[] }>({
       messages,
       jsonSchema: INTERPRET_SCHEMA,
-      timeoutMs: 20_000,
+      timeoutMs: 25_000,
+      totalCapMs: 28_000,
     })
 
     if (!llm.ok) {

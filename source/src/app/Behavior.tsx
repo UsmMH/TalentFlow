@@ -9,6 +9,8 @@ import { supabase, supabaseConfigured } from "./lib/supabase"
 import { Btn, Card, Dialog, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge, type Variant } from "./ui"
 
 const B = "/app/behavior"
+/** Must exceed /api/interpret-feedback LLM budget (cold start + OpenRouter on Vercel). */
+const INTERPRET_CLIENT_TIMEOUT_MS = 35_000
 const th = "px-4 py-3 text-start text-sm font-bold text-i500"
 const pathV = { now: "met", develop: "partial", specialist: "notAssessed", insufficient: "lowConf" } as const
 const tone = (s: string) => (s === "critical" ? "critical" : s === "partial" ? "partial" : "met") as "met" | "partial" | "critical"
@@ -497,15 +499,15 @@ export function RateForm() {
     const result = await postJson<{
       saved: { id: string; behavior_key: string; level: number; quote: string; rationale: string }[]
       dropped: { reason: string }[]
-    }>("/api/interpret-feedback", { submission_id: sub.id }, { timeoutMs: 20_000 })
+    }>("/api/interpret-feedback", { submission_id: sub.id }, { timeoutMs: INTERPRET_CLIENT_TIMEOUT_MS })
 
     if (!result.ok) {
       const timedOut = result.error === "timeout"
       setAiError(
         timedOut
           ? tr(
-            "استغرق التفسير أكثر من 20 ثانية. أضف تقييماً يدوياً بالمثال أعلاه، أو أعد المحاولة لاحقاً.",
-            "Interpretation took longer than 20 seconds. Add a manual rating with an example above, or try again later.",
+            "استغرق التفسير أكثر من 35 ثانية. أضف تقييماً يدوياً بالمثال أعلاه، أو أعد المحاولة لاحقاً.",
+            "Interpretation took longer than 35 seconds. Add a manual rating with an example above, or try again later.",
           )
           : tr(
             `تعذّر تفسير النص (${result.error}). يمكنك إدخال تقييم يدوي بالمثال أعلاه.`,
@@ -567,7 +569,7 @@ export function RateForm() {
         <Btn className="self-start" disabled={phase === "loading"} onClick={() => void analyze()}>{tr("اقترح تقييمات من النص", "Suggest ratings from the text")}</Btn>
         {phase === "loading" && (
           <div className="flex flex-col gap-2" role="status">
-            <b>{tr("جارٍ تفسير النص بالذكاء الاصطناعي… (قد يستغرق حتى 20 ثانية)", "Interpreting with AI… (may take up to 20 seconds)")}</b>
+            <b>{tr("جارٍ تفسير النص بالذكاء الاصطناعي… (قد يستغرق حتى 35 ثانية)", "Interpreting with AI… (may take up to 35 seconds)")}</b>
             <Skeleton className="h-12" /><Skeleton className="h-12" />
           </div>
         )}

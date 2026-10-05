@@ -2,6 +2,11 @@
   "buildCommand": "cd source && npm install && npm run build",
   "installCommand": "npm install && cd source && npm install",
   "outputDirectory": "source/dist",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     { "source": "/", "destination": "/landing.html" }
   ]
