@@ -1,7 +1,7 @@
 /** Plan prompts + JSON schema (PROJECT_SPEC §7.1, §7.4). */
 
-import type { JsonSchema } from "../llm.ts"
-import type { Analysis, EngineSnapshotPayload } from "../../../shared/validateAnalysis.ts"
+import type { JsonSchema } from "../llm"
+import type { Analysis, EngineSnapshotPayload } from "../../../shared/validateAnalysis"
 
 export const PLAN_SCHEMA: JsonSchema = {
   name: "plan_output",

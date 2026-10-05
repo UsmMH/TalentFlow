@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { extractOriginalQuote, isNormalizedSubstring, normalizeForQuoteMatch } from "./normalize.ts"
-import { validateProposals } from "./validateInterpret.ts"
+import { extractOriginalQuote, isNormalizedSubstring, normalizeForQuoteMatch } from "./normalize"
+import { validateProposals } from "./validateInterpret"
 
 describe("normalizeForQuoteMatch", () => {
   it("strips Arabic diacritics and tatweel", () => {

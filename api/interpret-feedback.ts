@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node"
-import { chatJson } from "./_lib/llm.ts"
-import { INTERPRET_SCHEMA, interpretSystemPrompt, interpretUserPrompt } from "./_lib/prompts/interpret.ts"
-import { getSupabaseAdmin } from "./_lib/supabaseAdmin.ts"
-import { validateProposals, type InterpretProposal } from "../shared/validateInterpret.ts"
+import { chatJson } from "./_lib/llm"
+import { INTERPRET_SCHEMA, interpretSystemPrompt, interpretUserPrompt } from "./_lib/prompts/interpret"
+import { getSupabaseAdmin } from "./_lib/supabaseAdmin"
+import { validateProposals, type InterpretProposal } from "../shared/validateInterpret"
 
 function bad(res: VercelResponse, status: number, error: string) {
   return res.status(status).json({ ok: false, error })

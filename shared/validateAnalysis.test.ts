@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { computeReadiness, type BehaviorSourceScores, type RatingsByBehavior } from "./engine.ts"
+import { computeReadiness, type BehaviorSourceScores, type RatingsByBehavior } from "./engine"
 import {
   snapshotHash,
   templateAnalysis,
@@ -7,7 +7,7 @@ import {
   toSnapshotPayload,
   validateAnalysis,
   validatePlan,
-} from "./validateAnalysis.ts"
+} from "./validateAnalysis"
 
 const r = (
   manager: number | null,

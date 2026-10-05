@@ -7,8 +7,8 @@ import {
   readiness,
   type BehaviorSourceScores,
   type RatingsByBehavior,
-} from "./engine.ts"
-import { TEAM_MANAGER_REQUIREMENTS, type RoleRequirement } from "./policy.ts"
+} from "./engine"
+import { TEAM_MANAGER_REQUIREMENTS, type RoleRequirement } from "./policy"
 
 const r = (
   manager: number | null,

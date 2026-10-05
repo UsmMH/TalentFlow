@@ -6,15 +6,15 @@
  * Usage (repo root):
  *   npx --yes tsx --env-file=source/.env.local scripts/test-analysis.ts
  */
-import { chatJson } from "../api/_lib/llm.ts"
-import { llmSmokeOpts } from "./llmSmokeOpts.ts"
-import { ANALYSIS_SCHEMA, analysisSystemPrompt, analysisUserPrompt } from "../api/_lib/prompts/analysis.ts"
-import { PLAN_SCHEMA, planSystemPrompt, planUserPrompt } from "../api/_lib/prompts/plan.ts"
+import { chatJson } from "../api/_lib/llm"
+import { llmSmokeOpts } from "./llmSmokeOpts"
+import { ANALYSIS_SCHEMA, analysisSystemPrompt, analysisUserPrompt } from "../api/_lib/prompts/analysis"
+import { PLAN_SCHEMA, planSystemPrompt, planUserPrompt } from "../api/_lib/prompts/plan"
 import {
   computeReadiness,
   type BehaviorSourceScores,
   type RatingsByBehavior,
-} from "../shared/engine.ts"
+} from "../shared/engine"
 import {
   snapshotHash,
   templateAnalysis,
@@ -23,7 +23,7 @@ import {
   validateAnalysis,
   validatePlan,
   type Analysis,
-} from "../shared/validateAnalysis.ts"
+} from "../shared/validateAnalysis"
 
 const r = (
   manager: number | null,

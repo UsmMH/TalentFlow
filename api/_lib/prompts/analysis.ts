@@ -1,7 +1,7 @@
 /** Analysis prompts + JSON schema (PROJECT_SPEC §7.1, §7.3). */
 
-import type { JsonSchema } from "../llm.ts"
-import type { EngineSnapshotPayload } from "../../../shared/validateAnalysis.ts"
+import type { JsonSchema } from "../llm"
+import type { EngineSnapshotPayload } from "../../../shared/validateAnalysis"
 
 export const ANALYSIS_SCHEMA: JsonSchema = {
   name: "analysis_output",

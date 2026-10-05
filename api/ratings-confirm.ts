@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node"
-import { getSupabaseAdmin } from "./_lib/supabaseAdmin.ts"
+import { getSupabaseAdmin } from "./_lib/supabaseAdmin"
 
 function bad(res: VercelResponse, status: number, error: string) {
   return res.status(status).json({ ok: false, error })

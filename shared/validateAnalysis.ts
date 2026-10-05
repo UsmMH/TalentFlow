@@ -1,8 +1,8 @@
 /** Analysis / plan validation + templates (PROJECT_SPEC §7.3–7.4). Pure, no I/O. */
 
-import type { ReadinessSnapshot } from "./engine.ts"
-import { BEHAVIOR_KEYS } from "./policy.ts"
-import type { BehaviorKey, ReadinessSignal } from "./types.ts"
+import type { ReadinessSnapshot } from "./engine"
+import { BEHAVIOR_KEYS } from "./policy"
+import type { BehaviorKey, ReadinessSignal } from "./types"
 
 export type Analysis = {
   summary: string

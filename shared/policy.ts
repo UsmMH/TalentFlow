@@ -1,6 +1,6 @@
 /** Editable policy constants for the scoring engine (PROJECT_SPEC §6). Not scientific constants. */
 
-import type { BehaviorKey } from "./types.ts"
+import type { BehaviorKey } from "./types"
 
 /** §6.2 — self is never included */
 export const SOURCE_WEIGHTS = {

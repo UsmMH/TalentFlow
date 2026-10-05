@@ -5,10 +5,10 @@
  * Does not write to the database. Never prints API keys.
  * Output is UTF-8 ASCII-friendly labels so it pastes cleanly on Windows terminals.
  */
-import { chatJson } from "../api/_lib/llm.ts"
-import { llmSmokeOpts } from "./llmSmokeOpts.ts"
-import { INTERPRET_SCHEMA, interpretSystemPrompt, interpretUserPrompt } from "../api/_lib/prompts/interpret.ts"
-import { validateProposals } from "../shared/validateInterpret.ts"
+import { chatJson } from "../api/_lib/llm"
+import { llmSmokeOpts } from "./llmSmokeOpts"
+import { INTERPRET_SCHEMA, interpretSystemPrompt, interpretUserPrompt } from "../api/_lib/prompts/interpret"
+import { validateProposals } from "../shared/validateInterpret"
 
 const BEHAVIORS = [
   {

@@ -1,6 +1,6 @@
 /** Pure scoring engine — no I/O. PROJECT_SPEC §6. */
 
-import type { BehaviorKey, Confidence, ReadinessSignal } from "./types.ts"
+import type { BehaviorKey, Confidence, ReadinessSignal } from "./types"
 import {
   BEHAVIOR_KEYS,
   BLIND_SPOT_GAP,
@@ -13,7 +13,7 @@ import {
   TEAM_MANAGER_REQUIREMENTS,
   type RoleRequirement,
   type ScoreSource,
-} from "./policy.ts"
+} from "./policy"
 
 export type { ScoreSource, RoleRequirement }
 export { SOURCE_WEIGHTS, TEAM_MANAGER_REQUIREMENTS, BEHAVIOR_KEYS }

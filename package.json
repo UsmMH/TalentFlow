@@ -1,7 +1,6 @@
 {
   "name": "talentflow",
   "private": true,
-  "type": "module",
   "scripts": {
     "test": "vitest run",
     "test:skills": "npm run test --prefix source",

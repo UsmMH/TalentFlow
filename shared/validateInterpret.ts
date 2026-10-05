@@ -1,8 +1,8 @@
 /** Validate LLM interpret proposals (PROJECT_SPEC §7.2). Pure, no I/O. */
 
-import { BEHAVIOR_KEYS } from "./policy.ts"
-import type { BehaviorKey } from "./types.ts"
-import { extractOriginalQuote } from "./normalize.ts"
+import { BEHAVIOR_KEYS } from "./policy"
+import type { BehaviorKey } from "./types"
+import { extractOriginalQuote } from "./normalize"
 
 export type InterpretProposal = {
   behavior_key: string

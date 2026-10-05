@@ -5,10 +5,10 @@ import {
   emptyRatings,
   type BehaviorSourceScores,
   type RatingsByBehavior,
-} from "../shared/engine.ts"
-import type { BehaviorKey } from "../shared/types.ts"
-import type { RoleRequirement, ScoreSource } from "../shared/policy.ts"
-import { getSupabaseAdmin } from "./_lib/supabaseAdmin.ts"
+} from "../shared/engine"
+import type { BehaviorKey } from "../shared/types"
+import type { RoleRequirement, ScoreSource } from "../shared/policy"
+import { getSupabaseAdmin } from "./_lib/supabaseAdmin"
 
 type Body = {
   employee_id?: string

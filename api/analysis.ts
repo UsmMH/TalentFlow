@@ -1,15 +1,15 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node"
-import { chatJson } from "./_lib/llm.ts"
-import { ANALYSIS_SCHEMA, analysisSystemPrompt, analysisUserPrompt } from "./_lib/prompts/analysis.ts"
-import { displayName, loadEmployeeRoleSnapshot } from "./_lib/loadSnapshot.ts"
-import { getSupabaseAdmin } from "./_lib/supabaseAdmin.ts"
+import { chatJson } from "./_lib/llm"
+import { ANALYSIS_SCHEMA, analysisSystemPrompt, analysisUserPrompt } from "./_lib/prompts/analysis"
+import { displayName, loadEmployeeRoleSnapshot } from "./_lib/loadSnapshot"
+import { getSupabaseAdmin } from "./_lib/supabaseAdmin"
 import {
   snapshotHash,
   templateAnalysis,
   toSnapshotPayload,
   validateAnalysis,
   type Analysis,
-} from "../shared/validateAnalysis.ts"
+} from "../shared/validateAnalysis"
 
 const DEMO_BUDGET_MS = 20_000
 

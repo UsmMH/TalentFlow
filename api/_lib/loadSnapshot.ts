@@ -7,10 +7,10 @@ import {
   type BehaviorSourceScores,
   type RatingsByBehavior,
   type ReadinessSnapshot,
-} from "../../shared/engine.ts"
-import type { BehaviorKey } from "../../shared/types.ts"
-import type { RoleRequirement, ScoreSource } from "../../shared/policy.ts"
-import { getSupabaseAdmin } from "./supabaseAdmin.ts"
+} from "../../shared/engine"
+import type { BehaviorKey } from "../../shared/types"
+import type { RoleRequirement, ScoreSource } from "../../shared/policy"
+import { getSupabaseAdmin } from "./supabaseAdmin"
 
 function isUuid(s: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)

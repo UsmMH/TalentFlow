@@ -1,6 +1,6 @@
 /** Interpret-feedback prompts and JSON schema (PROJECT_SPEC §7.1, §7.2). */
 
-import type { JsonSchema } from "../llm.ts"
+import type { JsonSchema } from "../llm"
 
 export type BehaviorForPrompt = {
   key: string
