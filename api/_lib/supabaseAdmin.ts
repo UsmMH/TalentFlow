@@ -1,7 +1,9 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
+import { loadLocalEnv } from "./loadLocalEnv"
 
 /** Server-only Supabase client. Never import this into frontend code. */
 export function getSupabaseAdmin(): SupabaseClient {
+  loadLocalEnv()
   const url = process.env.SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) {

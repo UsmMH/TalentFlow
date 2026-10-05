@@ -1,5 +1,7 @@
 /** OpenRouter LLM wrapper (PROJECT_SPEC §7.0). Server-only. */
 
+import { loadLocalEnv } from "./loadLocalEnv"
+
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string }
 
 export type JsonSchema = {
@@ -133,6 +135,7 @@ export async function chatJson<T>(opts: {
   /** If provided, invalid results advance to the next model. */
   validate?: (data: T) => { ok: true } | { ok: false; error: string }
 }): Promise<LlmResult<T>> {
+  loadLocalEnv()
   const perAttempt = opts.timeoutMs ?? FIRST_ATTEMPT_TIMEOUT_MS
   const totalCap = opts.totalCapMs ?? TOTAL_CAP_MS
   const models = modelsToTry()

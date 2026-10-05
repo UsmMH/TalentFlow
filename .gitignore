@@ -16,3 +16,5 @@ source/dist/
 Thumbs.db
 *.log
 .vercel
+
+.vercel

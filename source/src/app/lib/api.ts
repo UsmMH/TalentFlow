@@ -1,3 +1,14 @@
+/** User-facing hint when /api is unreachable (Vite-only dev without vercel dev). */
+export function describeApiError(error: string, tr: (ar: string, en: string) => string): string {
+  if (/502|503|504|ECONNREFUSED|Failed to fetch|Network error/i.test(error)) {
+    return tr(
+      "الخادم غير متاح. للتجربة الكاملة محلياً: شغّل npx vercel dev من جذر المشروع (منفذ 3000) مع npm run dev في source.",
+      "The API server is not reachable. For full local testing, run npx vercel dev from the repo root (port 3000) alongside npm run dev in source.",
+    )
+  }
+  return error
+}
+
 /** Browser calls to /api/* (Vercel). Optional VITE_API_BASE for split local dev. */
 export function apiUrl(path: string): string {
   const base = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? ""

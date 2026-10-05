@@ -4,7 +4,7 @@ import { useApp } from "./lib/i18n"
 import { PROMOTION_COST as P } from "./lib/assumptions.ts"
 import { PATH_NAME, RATER_NAME, ROLE, explainBehavior, explainReadiness, readiness, whatIf, type BId, type Rater } from "./lib/behavior.ts"
 import { useBehaviorData } from "./lib/behavior-data"
-import { postJson } from "./lib/api"
+import { describeApiError, postJson } from "./lib/api"
 import { supabase, supabaseConfigured } from "./lib/supabase"
 import { Btn, Card, Dialog, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge, type Variant } from "./ui"
 
@@ -16,13 +16,18 @@ const pathV = { now: "met", develop: "partial", specialist: "notAssessed", insuf
 const tone = (s: string) => (s === "critical" ? "critical" : s === "partial" ? "partial" : "met") as "met" | "partial" | "critical"
 const displayLevel = (cur: number | null, level: number | null) => level ?? (cur === null ? null : Math.floor(cur / 25) * 25)
 
+/** Guard: API/DB JSON sometimes stores a string; .length on a string would pass then .map throws. */
+function asArray<T>(v: unknown): T[] {
+  return Array.isArray(v) ? v : []
+}
+
 type FlowStep = "feedback" | "review" | "readiness" | "analysis" | "plan"
 
 function FlowStepper({ step }: { step: FlowStep }) {
   const { tr } = useApp()
   const steps: { id: FlowStep; label: string; to: string }[] = [
     { id: "feedback", label: tr("الملاحظات", "Feedback"), to: `${B}/rate` },
-    { id: "review", label: tr("مراجعة الاقتراحات", "Review AI suggestions"), to: `${B}/rate` },
+    { id: "review", label: tr("مراجعة الاقتراحات", "Review suggestions"), to: `${B}/rate` },
     { id: "readiness", label: tr("الجاهزية", "Readiness"), to: B },
     { id: "analysis", label: tr("التحليل", "Analysis"), to: `${B}/ahmad/analysis` },
     { id: "plan", label: tr("الخطة", "Plan"), to: "/app/me/behavior" },
@@ -31,15 +36,15 @@ function FlowStepper({ step }: { step: FlowStep }) {
   const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : null
   return (
     <div className="mb-6">
-      <ol className="m-0 flex list-none flex-wrap items-center gap-2 p-0" aria-label={tr("مسار العرض", "Demo flow")}>
+      <ol className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0" aria-label={tr("مسار العرض", "Demo flow")}>
         {steps.map((s, i) => {
           const on = s.id === step
           return (
-            <li key={s.id} className="flex items-center gap-2">
-              {i > 0 && <span className="text-i100" aria-hidden>→</span>}
+            <li key={s.id} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-xs text-i500" aria-hidden>›</span>}
               <Link
                 to={s.to}
-                className={`rounded-full px-3 py-1 text-[13px] font-bold no-underline ${on ? "bg-ink text-white" : "bg-mist text-i700 hover:text-ink"}`}
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-bold no-underline sm:px-3 sm:text-[13px] ${on ? "bg-ink text-white" : "bg-mist text-i700 hover:text-ink"}`}
                 aria-current={on ? "step" : undefined}
               >
                 {s.label}
@@ -334,12 +339,12 @@ export function BehaviorProfile() {
 
 /* ============ Individual Development Analysis ============ */
 export function Analysis() {
+  // Demo presentation is Arabic-first; generate on click only (no auto-fetch / no lang-triggered regen).
   const { tr, bi, n, lang } = useApp()
   const nav = useNavigate()
   const data = useBehaviorData()
   const e = data.emp("ahmad")
   const m = readiness(e.ratings, e.ratingDates, data.roleReqs)
-  const [hypo, setHypo] = useState(false)
   const m2 = readiness(whatIf(e.ratings), e.ratingDates, data.roleReqs)
   const [cost, setCost] = useState(P.replacementHiring + P.productivityLoss + P.teamTurnover)
   const [planCost, setPlanCost] = useState(P.developmentPlan)
@@ -352,55 +357,64 @@ export function Analysis() {
   const [savedNote, setSavedNote] = useState(false)
   const [aiMeta, setAiMeta] = useState<string>("")
 
-  async function loadAi(force = false) {
+  async function loadAi() {
     setLoadingAi(true)
     setAiError(null)
-    const body = { slug: "ahmad", role_slug: "team-manager", language: lang, force }
-    const [aRes, pRes] = await Promise.all([
-      postJson<{
-        analysis: AnalysisPayload
-        source: string
-        saved: boolean
-        model: string
-        latency_ms: number
-      }>("/api/analysis", body, { timeoutMs: 25_000 }),
-      postJson<{
-        plan: PlanPayload
-        source: string
-        saved: boolean
-        model: string
-        latency_ms: number
-      }>("/api/plan", body, { timeoutMs: 25_000 }),
-    ])
-    setLoadingAi(false)
-    if (!aRes.ok) {
-      setAiError(aRes.error)
-      return
-    }
-    setAnalysis(aRes.data.analysis)
-    setSavedNote(Boolean(aRes.data.saved) || aRes.data.source === "seed")
-    setAiMeta(`${aRes.data.source}/${aRes.data.model}`)
-    if (pRes.ok) {
-      setPlan(pRes.data.plan)
-      if (pRes.data.saved || pRes.data.source === "seed") setSavedNote(true)
+    try {
+      const body = { slug: "ahmad", role_slug: "team-manager", language: lang, force: true }
+      const [aRes, pRes] = await Promise.all([
+        postJson<{
+          analysis: AnalysisPayload
+          source: string
+          saved: boolean
+          model: string
+          latency_ms: number
+        }>("/api/analysis", body, { timeoutMs: 25_000 }),
+        postJson<{
+          plan: PlanPayload
+          source: string
+          saved: boolean
+          model: string
+          latency_ms: number
+        }>("/api/plan", body, { timeoutMs: 25_000 }),
+      ])
+      if (!aRes.ok) {
+        setAiError(describeApiError(aRes.error, tr))
+        return
+      }
+      if (aRes.data.analysis && typeof aRes.data.analysis === "object") {
+        setAnalysis(aRes.data.analysis)
+      }
+      setSavedNote(Boolean(aRes.data.saved) || aRes.data.source === "seed")
+      setAiMeta(`${aRes.data.source}/${aRes.data.model}`)
+      if (pRes.ok && pRes.data.plan?.items) {
+        setPlan(pRes.data.plan)
+        if (pRes.data.saved || pRes.data.source === "seed") setSavedNote(true)
+      }
+    } catch (err) {
+      setAiError(describeApiError(err instanceof Error ? err.message : "Network error", tr))
+    } finally {
+      setLoadingAi(false)
     }
   }
 
-  useEffect(() => {
-    if (data.loading) return
-    void loadAi(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when UI language changes
-  }, [data.loading, lang])
-
-  const strengths = analysis?.strengths?.length
-    ? analysis.strengths
+  const aiStrengths = asArray<AnalysisPayload["strengths"][number]>(analysis?.strengths)
+  const aiGaps = asArray<AnalysisPayload["development_areas"][number]>(analysis?.development_areas)
+  const aiBlind = asArray<AnalysisPayload["blind_spots"][number]>(analysis?.blind_spots)
+  const strengths = aiStrengths.length
+    ? aiStrengths
     : m.parts.filter((p) => p.status === "met").map((p) => ({ behavior_key: p.id, evidence: "" }))
-  const gaps = analysis?.development_areas?.length
-    ? analysis.development_areas
+  const gaps = aiGaps.length
+    ? aiGaps
     : m.parts.filter((p) => p.status !== "met").map((p) => ({ behavior_key: p.id, evidence: "", why_it_matters: "" }))
-  const blind = analysis?.blind_spots?.length
-    ? analysis.blind_spots
+  const blind = aiBlind.length
+    ? aiBlind
     : m.parts.filter((p) => p.blind).map((p) => ({ behavior_key: p.id, explanation: "" }))
+  const pathOptions = asArray<NonNullable<AnalysisPayload["path_options"]>[number]>(analysis?.path_options)
+  const missingEvidence = asArray<string>(analysis?.readiness_view?.missing_evidence)
+  const planItems = asArray<PlanPayload["items"][number]>(plan?.items)
+  const delegPart = m.parts.find((p) => p.id === "delegation") ?? m.parts[0]
+  const delegPart2 = m2.parts.find((p) => p.id === "delegation") ?? m2.parts[0]
 
   if (data.loading) return <><PageTitle>{tr("تحليل التطوير الفردي", "Individual development analysis")}</PageTitle><FlowStepper step="analysis" /><Skeleton className="h-48" /></>
   const input = "w-[160px] rounded-[12px] border border-i100 bg-white px-3 py-2 text-base"
@@ -421,8 +435,8 @@ export function Analysis() {
       <DataNotice error={data.error} />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Btn kind="outline" disabled={loadingAi} onClick={() => void loadAi(true)}>
-          {loadingAi ? tr("جارٍ التوليد…", "Generating…") : tr("توليد / تحديث", "Generate / Refresh")}
+        <Btn disabled={loadingAi} onClick={() => void loadAi()}>
+          {loadingAi ? tr("جارٍ التوليد…", "Generating…") : analysis ? tr("توليد / تحديث", "Generate / Refresh") : tr("توليد التحليل والخطة", "Generate analysis & plan")}
         </Btn>
         <span className="rounded-full border border-dashed border-i500 px-3 py-1 text-[13px] font-bold text-i500">
           {tr("مولَّد بالذكاء الاصطناعي · القرار للإنسان", "AI-generated · a human decides")}
@@ -440,17 +454,18 @@ export function Analysis() {
         </div>
       )}
       {aiError && (
-        <Card className="mb-4 border-crit p-4 text-base text-ink">
-          {tr(
-            `تعذّر التوليد (${aiError}). يمكنك إعادة المحاولة أو الاعتماد على الإشارة المحسوبة أدناه.`,
-            `Could not generate (${aiError}). You can retry or rely on the calculated signal below.`,
-          )}
+        <Card className="mb-4 border-crit p-4 text-base leading-[1.7] text-ink" role="alert">
+          <p className="m-0 mb-2 font-bold">{tr("تعذّر تحميل التحليل من الخادم", "Could not load analysis from the server")}</p>
+          <p className="m-0">{aiError}</p>
+          <p className="m-0 mt-2 text-sm text-i700">{tr("الأقسام أدناه مبنية على محرك الجاهزية المحسوب — يمكنك متابعة العرض.", "Sections below use the calculated readiness engine — you can continue the demo.")}</p>
         </Card>
       )}
       {!loadingAi && !analysis && !aiError && (
-        <DataNotice empty emptyHint={tr("لا يوجد تحليل محفوظ بعد. اضغط توليد.", "No saved analysis yet. Press Generate.")} />
+        <DataNotice empty emptyHint={tr("اضغط «توليد التحليل والخطة» لطلب الشرح من الخادم. الأقسام أدناه جاهزة من محرك الجاهزية.", "Press “Generate analysis & plan” to request the server explanation. Sections below already use the readiness engine.")} />
       )}
-      {analysis?.summary && <p className="mb-6 max-w-[820px] text-base leading-[1.7] text-i900">{analysis.summary}</p>}
+      {typeof analysis?.summary === "string" && analysis.summary && (
+        <p className="mb-6 max-w-[820px] text-base leading-[1.7] text-i900">{analysis.summary}</p>
+      )}
       {analysis?.caution && <p className="mb-6 text-sm leading-[1.7] text-i500">{analysis.caution}</p>}
 
       <div className="mb-6 grid gap-4 md:grid-cols-3">
@@ -486,10 +501,16 @@ export function Analysis() {
           {blind.map((b, i) => (
             <p key={`${b.behavior_key}-${i}`} className="m-0 text-base leading-[1.7] text-i900">
               {b.explanation
-                || tr(
-                  `«${bi(data.behaviors[b.behavior_key as BId].name)}»: يرى أحمد نفسه عند ${e.ratings[b.behavior_key as BId].self}، بينما يراه المدير والزملاء عند ${e.ratings[b.behavior_key as BId].manager} و${e.ratings[b.behavior_key as BId].peer}.`,
-                  `"${bi(data.behaviors[b.behavior_key as BId].name)}": Ahmed sees himself at ${e.ratings[b.behavior_key as BId].self}, while his manager and peers see him at ${e.ratings[b.behavior_key as BId].manager} and ${e.ratings[b.behavior_key as BId].peer}.`,
-                )}
+                || (() => {
+                  const key = b.behavior_key as BId
+                  const beh = data.behaviors[key]
+                  const r = e.ratings[key]
+                  if (!beh || !r) return b.behavior_key
+                  return tr(
+                    `«${bi(beh.name)}»: يرى أحمد نفسه عند ${r.self ?? "—"}، بينما يراه المدير والزملاء عند ${r.manager ?? "—"} و${r.peer ?? "—"}.`,
+                    `"${bi(beh.name)}": Ahmed sees himself at ${r.self ?? "—"}, while his manager and peers see him at ${r.manager ?? "—"} and ${r.peer ?? "—"}.`,
+                  )
+                })()}
             </p>
           ))}
         </Card>
@@ -498,8 +519,8 @@ export function Analysis() {
       <Card className="mb-6 p-6">
         <div className="mb-2 text-sm font-bold text-i500">{tr("ما الذي سيقوّي الملف؟", "What would strengthen the case?")}</div>
         <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
-          {(analysis?.readiness_view?.missing_evidence?.length
-            ? analysis.readiness_view.missing_evidence
+          {(missingEvidence.length
+            ? missingEvidence
             : [
                 tr("تقييم من الزملاء لمعالجة الخلافات، فهو غير متوفر حالياً.", "A peer rating for conflict handling, which is missing today."),
                 tr("أدلة جديدة على التفويض بعد مشروع صغير يقوده بنفسه.", "New evidence of delegation after a small project he leads himself."),
@@ -510,11 +531,11 @@ export function Analysis() {
           <div className="mt-4 grid gap-3 text-sm leading-[1.7] text-i700 md:grid-cols-2">
             <div>
               <div className="font-bold text-i500">{tr("أدلة مع الإشارة", "Evidence for")}</div>
-              <ul className="m-0 list-disc ps-5">{analysis.readiness_view.evidence_for.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              <ul className="m-0 list-disc ps-5">{asArray<string>(analysis.readiness_view.evidence_for).map((x, i) => <li key={i}>{x}</li>)}</ul>
             </div>
             <div>
               <div className="font-bold text-i500">{tr("أدلة ضد الإشارة", "Evidence against")}</div>
-              <ul className="m-0 list-disc ps-5">{analysis.readiness_view.evidence_against.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              <ul className="m-0 list-disc ps-5">{asArray<string>(analysis.readiness_view.evidence_against).map((x, i) => <li key={i}>{x}</li>)}</ul>
             </div>
           </div>
         )}
@@ -522,9 +543,9 @@ export function Analysis() {
 
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("المسار المقترح", "Suggested path")}</h2>
       <div className="mb-6 grid gap-4 md:grid-cols-3">
-        {(analysis?.path_options?.length
-          ? analysis.path_options.map((opt, i) => {
-              const recommended = opt.option === (analysis.readiness_view?.signal ?? m.signal) || i === 0
+        {(pathOptions.length
+          ? pathOptions.map((opt, i) => {
+              const recommended = opt.option === (analysis?.readiness_view?.signal ?? m.signal) || i === 0
               return (
                 <Card key={i} className={`flex flex-col gap-3 p-6 ${recommended ? "border-2 border-flow" : ""}`}>
                   <b className="text-xl text-ink">{opt.option}</b>
@@ -545,11 +566,11 @@ export function Analysis() {
         )}
       </div>
 
-      {plan?.items?.length ? (
+      {planItems.length ? (
         <>
           <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("خطة التطوير", "Development plan")}</h2>
           <ol className="m-0 mb-6 flex list-none flex-col gap-4 p-0">
-            {plan.items.map((item, i) => (
+            {planItems.map((item, i) => (
               <li key={i}>
                 <Card className="flex flex-wrap items-center gap-4 p-6">
                   <span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span>
@@ -568,10 +589,18 @@ export function Analysis() {
 
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("ماذا لو؟", "What if?")}</h2>
       <Card className="mb-6 flex flex-col gap-4 p-6">
-        <label className="flex items-center gap-3 text-base font-bold text-ink"><input type="checkbox" checked={hypo} onChange={(ev) => setHypo(ev.target.checked)} />{tr("ماذا لو قاد أحمد مشروعاً صغيراً أولاً؟", "What if Ahmad leads a small project first?")}</label>
+        <p className="m-0 text-base font-bold text-ink">{tr("ماذا لو قاد أحمد مشروعاً صغيراً أولاً؟", "What if Ahmad leads a small project first?")}</p>
         <div className="grid gap-4 md:grid-cols-2">
-          <div><div className="text-sm text-i500">{tr("الآن", "Now")}</div><div className="font-num text-[40px] font-extrabold leading-none text-ink">{m.rounded}%</div><div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={m.parts[0].cur} /></div></div>
-          <div className={hypo ? "" : "opacity-40"}><div className="text-sm text-i500">{tr("افتراضياً بعد المشروع", "Hypothetically after the project")}</div><div className="font-num text-[40px] font-extrabold leading-none text-ink">{hypo ? m2.rounded : "—"}%</div><div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={hypo ? m2.parts[0].cur : null} /></div></div>
+          <div>
+            <div className="text-sm text-i500">{tr("الآن", "Now")}</div>
+            <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m.rounded}%</div>
+            <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart?.cur ?? null, delegPart?.level ?? null)} /></div>
+          </div>
+          <div>
+            <div className="text-sm text-i500">{tr("افتراضياً بعد المشروع", "Hypothetically after the project")}</div>
+            <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m2.rounded}%</div>
+            <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart2?.cur ?? null, delegPart2?.level ?? null)} /></div>
+          </div>
         </div>
         <p className="m-0 text-sm leading-[1.7] text-i500">{tr("افتراض: يتحقق فقط إذا أظهرت تقييمات المدير والزملاء بعد المشروع مستوى 75 في التفويض. لا يُحفظ ولا يغيّر الدرجات الحالية.", "Assumption: it only holds if the manager's and peers' ratings after the project show level 75 in delegation. It isn't saved and doesn't change current scores.")}</p>
       </Card>
@@ -720,10 +749,7 @@ export function RateForm() {
             "استغرق التفسير أكثر من 35 ثانية. أضف تقييماً يدوياً بالمثال أدناه، أو أعد المحاولة لاحقاً.",
             "Interpretation took longer than 35 seconds. Add a manual rating with an example below, or try again later.",
           )
-          : tr(
-            `تعذّر تفسير النص (${result.error}). يمكنك إدخال تقييم يدوي بالمثال أدناه.`,
-            `Could not interpret the text (${result.error}). You can add a manual rating with an example below.`,
-          ),
+          : describeApiError(result.error, tr),
       )
       setPhase("error")
       return
@@ -791,19 +817,22 @@ export function RateForm() {
       <FlowStepper step={step} />
       <DataNotice error={data.error} />
 
-      <Card className="mb-6 flex flex-col gap-4 p-6">
-        <div>
-          <div className="text-sm font-bold text-i500">{tr("الموظف", "Employee")}</div>
-          <div className="mt-1 text-lg font-bold text-ink">{bi(employee.name)}</div>
-          <div className="text-sm text-i500">{bi(employee.role)}</div>
+      <Card className="mb-6 flex flex-col gap-5 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-i100 pb-4">
+          <div>
+            <div className="text-sm font-bold text-i500">{tr("الموظف", "Employee")}</div>
+            <div className="mt-1 text-lg font-bold text-ink">{bi(employee.name)}</div>
+            <div className="text-sm text-i500">{bi(employee.role)}</div>
+          </div>
+          <div className="min-w-[200px]">
+            <div className="mb-2 text-sm font-bold text-i500">{tr("نوع المقيِّم", "Rater type")}</div>
+            <div className="flex flex-wrap gap-2">{(["manager", "peer", "self"] as Rater[]).map((k) => <button key={k} type="button" className={chip(rater === k)} onClick={() => setRater(k)}>{bi(RATER_NAME[k])}</button>)}</div>
+          </div>
         </div>
-        <div className="text-sm font-bold text-i500">{tr("نوع المقيِّم", "Rater type")}</div>
-        <div className="flex flex-wrap gap-2">{(["manager", "peer", "self"] as Rater[]).map((k) => <button key={k} type="button" className={chip(rater === k)} onClick={() => setRater(k)}>{bi(RATER_NAME[k])}</button>)}</div>
-      </Card>
 
-      <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("قراءة الملاحظات النصية", "Reading free-text feedback")}</h2>
-      <Card className="mb-6 flex flex-col gap-4 p-6">
-        <textarea value={text} onChange={(ev) => setText(ev.target.value)} rows={5} className="rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900" aria-label={tr("ملاحظات المشروع", "Project feedback")} />
+        <div className="flex w-full min-w-0 flex-col gap-4">
+          <h2 className="m-0 text-lg font-bold text-ink">{tr("قراءة الملاحظات النصية", "Reading free-text feedback")}</h2>
+        <textarea value={text} onChange={(ev) => setText(ev.target.value)} rows={5} className="box-border w-full min-w-0 rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900" aria-label={tr("ملاحظات المشروع", "Project feedback")} />
         <Btn className="self-start" disabled={phase === "loading"} onClick={() => void analyze()}>{tr("اقترح تقييمات من النص", "Suggest ratings from the text")}</Btn>
         {phase === "loading" && (
           <div className="flex flex-col gap-2" role="status" aria-live="polite">
@@ -865,21 +894,24 @@ export function RateForm() {
             </div>
           )
         })}
-        <p className="m-0 text-sm leading-[1.7] text-i500">{tr("الاقتراحات تبقى «بانتظار التأكيد» حتى يراجعها شخص. الدرجات تأتي من قواعد معلنة، ولا يخترع النظام رقماً.", "Suggestions stay \"awaiting confirmation\" until a person reviews them. Scores come from declared rules; the system never invents a number.")}</p>
-      </Card>
+          <p className="m-0 text-sm leading-[1.7] text-i500">{tr("الاقتراحات تبقى «بانتظار التأكيد» حتى يراجعها شخص. الدرجات تأتي من قواعد معلنة، ولا يخترع النظام رقماً.", "Suggestions stay \"awaiting confirmation\" until a person reviews them. Scores come from declared rules; the system never invents a number.")}</p>
+        </div>
 
-      <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("تقييم يدوي (احتياطي)", "Manual rating (fallback)")}</h2>
-      <Card className="mb-6 flex flex-col gap-4 p-6">
-        <div className="text-sm font-bold text-i500">{tr("السلوك", "Behavior")}</div>
-        <div className="flex flex-wrap gap-2">{data.roleReqs.map((q) => <button key={q.id} type="button" className={chip(bid === q.id)} onClick={() => setBid(q.id)}>{bi(data.behaviors[q.id].name)}</button>)}</div>
-        <div className="text-sm font-bold text-i500">{tr("المستوى", "Level")}</div>
-        <div className="flex overflow-hidden self-start rounded-[12px] border border-i100">{[25, 50, 75, 100].map((l) => <button key={l} type="button" onClick={() => setLevel(l)} className={`border-0 px-4 py-2 text-sm font-bold ${level === l ? "bg-ink text-white" : "bg-white text-i700"}`}><span className="font-num">{l}</span></button>)}</div>
-        <label className="flex flex-col gap-2 text-sm font-bold text-i500">{tr("مثال ملموس (مطلوب)", "A concrete example (required)")}
-          <textarea value={example} onChange={(ev) => setExample(ev.target.value)} rows={3} placeholder={tr("مثال: في اجتماع الأسبوع الماضي…", "For example: in last week's meeting…")} className="rounded-[12px] border border-i100 bg-white p-3 text-base font-normal text-i900" />
-        </label>
-        {error && <p role="alert" className="m-0 text-sm font-bold text-i900">{tr("أضف مثالاً ملموساً قبل الحفظ.", "Add a concrete example before saving.")}</p>}
-        {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم", "Rating saved")} />}
-        <Btn className="self-start" onClick={() => void submitManual()}>{tr("حفظ التقييم", "Save rating")}</Btn>
+        <details className="rounded-[12px] border border-i100 bg-mist/50 p-4">
+          <summary className="cursor-pointer text-sm font-bold text-i700">{tr("تقييم يدوي (احتياطي)", "Manual rating (fallback)")}</summary>
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="text-sm font-bold text-i500">{tr("السلوك", "Behavior")}</div>
+            <div className="flex flex-wrap gap-2">{data.roleReqs.map((q) => <button key={q.id} type="button" className={chip(bid === q.id)} onClick={() => setBid(q.id)}>{bi(data.behaviors[q.id].name)}</button>)}</div>
+            <div className="text-sm font-bold text-i500">{tr("المستوى", "Level")}</div>
+            <div className="flex overflow-hidden self-start rounded-[12px] border border-i100">{[25, 50, 75, 100].map((l) => <button key={l} type="button" onClick={() => setLevel(l)} className={`border-0 px-4 py-2 text-sm font-bold ${level === l ? "bg-ink text-white" : "bg-white text-i700"}`}><span className="font-num">{l}</span></button>)}</div>
+            <label className="flex flex-col gap-2 text-sm font-bold text-i500">{tr("مثال ملموس (مطلوب)", "A concrete example (required)")}
+              <textarea value={example} onChange={(ev) => setExample(ev.target.value)} rows={3} placeholder={tr("مثال: في اجتماع الأسبوع الماضي…", "For example: in last week's meeting…")} className="box-border w-full min-w-0 rounded-[12px] border border-i100 bg-white p-3 text-base font-normal text-i900" />
+            </label>
+            {error && <p role="alert" className="m-0 text-sm font-bold text-i900">{tr("أضف مثالاً ملموساً قبل الحفظ.", "Add a concrete example before saving.")}</p>}
+            {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم", "Rating saved")} />}
+            <Btn className="self-start" onClick={() => void submitManual()}>{tr("حفظ التقييم", "Save rating")}</Btn>
+          </div>
+        </details>
       </Card>
     </>
   )

@@ -64,8 +64,12 @@ export function CandidateTypeBadge({ type }: { type: "internal" | "external" }) 
 /* ---------- Level / SkillBar ---------- */
 export function LevelLabel({ level }: { level: number | null }) {
   const { tr } = useApp()
-  if (level === null) return <span className="text-i500">{tr("غير مقيّم", "Not assessed")}</span>
-  const [ar, en] = LEVEL_NAME[level as 0 | 25 | 50 | 75 | 100]
+  if (level === null || Number.isNaN(level)) return <span className="text-i500">{tr("غير مقيّم", "Not assessed")}</span>
+  // Snap continuous readiness scores (e.g. 62.5) onto rubric steps; LEVEL_NAME only has 0/25/50/75/100.
+  const step = ([0, 25, 50, 75, 100] as const).includes(level as 0 | 25 | 50 | 75 | 100)
+    ? (level as 0 | 25 | 50 | 75 | 100)
+    : ((Math.max(0, Math.min(100, Math.round(level / 25) * 25)) || 0) as 0 | 25 | 50 | 75 | 100)
+  const [ar, en] = LEVEL_NAME[step]
   return (
     <span className="whitespace-nowrap">
       <b className="font-num font-extrabold">{level}</b> · {tr(ar, en)}
@@ -179,21 +183,24 @@ export function ExplainProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function HowLink({ explain, label }: { explain: Explain; label?: string }) {
+export function HowLink({ explain, label, compact }: { explain: Explain; label?: string; compact?: boolean }) {
   const open = useExplain()
   const { tr } = useApp()
   return (
-    <button onClick={() => open(explain)} className="border-0 bg-transparent p-0 text-sm font-bold text-flow underline">
-      {label ?? tr("كيف حُسب؟", "How calculated?")}
+    <button
+      onClick={() => open(explain)}
+      className="whitespace-nowrap border-0 bg-transparent p-0 text-sm font-bold text-flow underline"
+    >
+      {label ?? (compact ? tr("الشرح", "Explain") : tr("كيف حُسب؟", "How calculated?"))}
     </button>
   )
 }
 
-export function ScoreCell({ value, explain, size = 32 }: { value: string; explain: Explain; size?: number }) {
+export function ScoreCell({ value, explain, size = 32, compactExplain }: { value: string; explain: Explain; size?: number; compactExplain?: boolean }) {
   return (
-    <div className="flex flex-col items-start gap-1">
+    <div className="flex flex-col items-start gap-0.5">
       <span className="font-num font-extrabold leading-none text-ink" style={{ fontSize: size }}><Num text={value} /></span>
-      <HowLink explain={explain} />
+      <HowLink explain={explain} compact={compactExplain ?? size <= 56} />
     </div>
   )
 }

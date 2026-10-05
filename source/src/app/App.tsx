@@ -39,8 +39,8 @@ export default function App() {
         <Route path="roles/senior-data-analyst/decision" element={<Decision />} />
         <Route path="behavior" element={<BehaviorOverview />} />
         <Route path="behavior/rate" element={<RateForm />} />
-        <Route path="behavior/:id" element={<BehaviorProfile />} />
         <Route path="behavior/ahmad/analysis" element={<Analysis />} />
+        <Route path="behavior/:id" element={<BehaviorProfile />} />
         <Route path="me/behavior" element={<MyBehavior />} />
         <Route path="me" element={<MyReadiness />} />
         <Route path="me/plan" element={<MyPlan />} />

@@ -1,6 +1,20 @@
 # PROJECT_SPEC.md: Behavioral Readiness Platform (working name: TalentFlow)
 
-> **For Cursor:** read this whole file before writing code. The **frontend is already built** (with Claude Code). Your job is to connect it to a real backend (Supabase), add the scoring engine and AI endpoints, and deploy to Vercel. **Do not redesign or restyle the UI.** Items marked **[confirm]** need a decision from the team before you rely on them.
+> **For Cursor:** read this whole file before writing code. The **frontend lives in `source/`** (Vite + React). Backend is **Vercel Functions** in `/api` + **Supabase** + **OpenRouter**. Prefer wiring and demo polish over redesign. Items marked **[confirm]** need a team decision.
+
+## Current status (updated 2026-10-05)
+
+| Area | Status |
+|---|---|
+| Phases 0–5 (audit → seed → engine → interpret → analysis/plan → employee view) | **Done** for the Ahmed demo path |
+| `/api` routes: readiness, interpret-feedback, ratings-confirm, analysis, plan, health, reset-demo | **Live** |
+| UI focus pass (behavioral nav primary, flow stepper, feedback/profile polish, empty/loading/error, demo reset) | **Done** |
+| Analysis & plan: generate **on button click** (not auto); What-if comparison always visible | **Done** |
+| Demo presentation language | **Arabic-first** (UI chrome bilingual; rehearse AI generate in Arabic) |
+| Skills / hiring screens | Still secondary (local mocks); collapsed under nav |
+| Production deploy rehearsal + pinned Arabic fallbacks for stage | **Next** |
+
+**Local full stack:** Vite in `source` (`:5173`) + `npx vercel dev --listen 3000` at repo root. API loads missing secrets from root `.env.local` when Vercel Development env omits Sensitive vars (`api/_lib/loadLocalEnv.ts`).
 
 ## Contents
 1. Product summary
@@ -356,16 +370,20 @@ Pre-generate and store the analysis and plan for the three seed employees (`deve
 
 | Route | Method | Purpose | AI? |
 |---|---|---|---|
+| `/api/health` | GET | Liveness | No |
 | `/api/readiness` | POST `{employee_id, role_id}` | Run the engine, return the snapshot | No |
 | `/api/interpret-feedback` | POST `{submission_id}` | Propose ratings from free text | Yes |
-| `/api/ratings/confirm` | POST `{rating_id, action}` | Confirm or reject an AI-suggested rating | No |
-| `/api/analysis` | POST `{employee_id, role_id, language}` | Generate and store the analysis | Yes |
-| `/api/plan` | POST `{employee_id, role_id, language}` | Generate and store the plan | Yes |
+| `/api/ratings-confirm` | POST `{rating_id, action}` | Confirm or reject an AI-suggested rating | No |
+| `/api/analysis` | POST `{slug, role_slug, language, force?}` | Generate and store the analysis | Yes |
+| `/api/plan` | POST `{slug, role_slug, language, force?}` | Generate and store the plan | Yes |
+| `/api/reset-demo` | POST | Demo-only reset (gated by `ALLOW_DEMO_RESET=true`) | No |
 | `/api/audit` | GET `?employee_id=` | Deterministic flags (P1) | No |
 | `/api/whatif` | POST `{employee_id, role_id, question}` | What-if (P1) | Yes |
 | `/api/cost` | POST `{...}` | Cost comparison and breakeven (P1) | No |
 
 Return `{ ok: boolean, data?, error? }` consistently. Validate all inputs.
+
+**UI notes (analysis screen):** do not auto-call `/api/analysis` or `/api/plan` on page enter or language change. User clicks **Generate**. Chrome (nav/labels) follows UI language immediately; AI body text stays in the language it was generated in until the next Generate. Demo day: stay on Arabic and generate once.
 
 ---
 
@@ -401,14 +419,19 @@ All data is **synthetic**. Say so in the UI footer or demo notes.
 | `SUPABASE_URL` | `/api` | No |
 | `OPENROUTER_API_KEY` | `/api` only | **No** |
 | `LLM_MODEL`, `LLM_FALLBACK_MODELS` (optional) | `/api` only | No |
+| `ALLOW_DEMO_RESET` | `/api` only | No — must be `"true"` to enable `POST /api/reset-demo` |
+
+Put server vars in **repo-root** `.env.local` for `vercel dev`, and frontend `VITE_*` in `source/.env.local`. See `.env.example` and `source/.env.example`.
+
+**Local split-dev:**
+1. Terminal A (repo root): `npx vercel dev --listen 3000`
+2. Terminal B: `cd source && npm run dev` → `http://localhost:5173`
+3. Vite proxies `/api` → `127.0.0.1:3000`. Vite alone → 502 on AI routes.
 
 **Vercel:**
 1. Push the repo to GitHub and import it in Vercel. Vercel builds it, so **do not commit `dist`**.
-2. Add the environment variables in the Vercel project settings (Production and Preview).
-3. For a client-side-routed SPA, add `vercel.json` so deep links work and `/api` is excluded:
-```json
-{ "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }] }
-```
+2. Add the environment variables in the Vercel project settings (Production, Preview, and Development if you use cloud pull). Sensitive Production secrets may not inject into `vercel dev` — keep a local `.env.local`.
+3. Build from `source` → `source/dist`. `/` → landing (`landing.html`), `/app.html` → app (HashRouter). Leave `/api/*` alone.
 4. Use a cheaper model while developing and the best one for demo day. Check rate limits beforehand.
 
 ---
@@ -426,35 +449,37 @@ All data is **synthetic**. Say so in the UI footer or demo notes.
 
 ## 12. Implementation order
 
-| Phase | Work | Done when |
-|---|---|---|
-| 0 | Task 0 audit and `FRONTEND_MAP.md`; create Supabase project; run `schema.sql` | Map committed, tables exist |
-| 1 | Seed data; Supabase client in the frontend; replace mock data for the employee list and profile (read-only) | Profile screens show DB data |
-| 2 | `shared/engine.ts` with unit tests; `/api/readiness`; connect the readiness view | Ahmed = 79.17, Develop first; Sara and Khaled tests pass |
-| 3 | Feedback form writes ratings; `/api/interpret-feedback` with quote validation; confirm and reject UI | Ahmed's free text produces valid pending proposals |
-| 4 | `/api/analysis` and `/api/plan` with validation and fallback; store results | Analysis and plan render for all three employees |
-| 5 | Employee view; Arabic/English handling for AI output | Employee sees own plan |
-| 6 | P1 as time allows, in order: audit flags, cost comparison, what-if | Each behind its own route |
-| 7 | Deploy to Vercel; test on the deployed URL; rehearse the demo path; confirm stored fallbacks | Full demo passes on production |
+| Phase | Work | Done when | Status |
+|---|---|---|---|
+| 0 | Task 0 audit and `FRONTEND_MAP.md`; create Supabase project; run `schema.sql` | Map committed, tables exist | Done |
+| 1 | Seed data; Supabase client in the frontend; replace mock data for the employee list and profile (read-only) | Profile screens show DB data | Done |
+| 2 | `shared/engine.ts` with unit tests; `/api/readiness`; connect the readiness view | Ahmed = 79.17, Develop first; Sara and Khaled tests pass | Done |
+| 3 | Feedback form writes ratings; `/api/interpret-feedback` with quote validation; confirm and reject UI | Ahmed's free text produces valid pending proposals | Done |
+| 4 | `/api/analysis` and `/api/plan` with validation and fallback; store results | Analysis and plan render for Ahmed (demo protagonist) | Done (generate-on-click) |
+| 5 | Employee view; Arabic/English handling for AI output | Employee sees own plan | Done (UI bilingual; demo rehearse in AR) |
+| UI | Behavioral nav primary; flow stepper; feedback/profile polish; empty/loading/error; `/api/reset-demo` | Manager path is demo-ready | Done |
+| 6 | P1 as time allows, in order: audit flags, cost comparison polish, conversational what-if | Each behind its own route | Optional / partial (cost + what-if UI exist client-side) |
+| 7 | Deploy to Vercel; test on the deployed URL; rehearse Arabic demo path; confirm stored fallbacks | Full demo passes on production | **Next** |
 
 ---
 
 ## 13. Definition of done
 
-- [ ] The full demo path works on the deployed URL: profile → feedback → AI interpretation → confirm → readiness → analysis → plan → employee view.
-- [ ] Engine unit tests pass for Ahmed, Sara and Khaled.
-- [ ] AI outputs are validated, and the fallback works when the AI call fails.
-- [ ] No secret appears in frontend code or the Git history.
-- [ ] Every score has a "how was this calculated?" path.
-- [ ] No loading state hangs for more than 15 seconds.
-- [ ] Demo data is labelled synthetic.
+- [x] The full demo path works locally with Vite + `vercel dev`: profile → feedback → AI interpretation → confirm → readiness → analysis → plan → employee view.
+- [ ] Same path verified on the **deployed** production URL (rehearsal).
+- [x] Engine unit tests pass for Ahmed, Sara and Khaled (`npm test` / scoring asserts).
+- [x] AI outputs are validated, and the UI falls back to the readiness engine when the AI call fails or times out.
+- [x] No secret appears in frontend code (service role / OpenRouter server-only).
+- [x] Every score has a "how was this calculated?" path.
+- [x] Analysis does not auto-hang on page enter; user starts Generate; long LLM calls show loading / error with engine fallback.
+- [x] Demo data is labelled synthetic; optional `POST /api/reset-demo` when `ALLOW_DEMO_RESET=true`.
 
 ---
 
 ## 14. Working agreements for Cursor
 
 - Make small, focused changes and commit often. Explain what you changed.
-- Do not change the UI design, layout or copy unless asked.
+- Do not redesign the product visual language without being asked; targeted UX fixes for the demo path are allowed when requested.
 - Keep engine code pure and tested. No I/O in `shared/`.
 - Prefer simple solutions. Do not add libraries without saying why.
 - When something is ambiguous, ask rather than guess.
@@ -465,6 +490,18 @@ All data is **synthetic**. Say so in the UI footer or demo notes.
 
 ---
 
+## 15. Open questions
+
+1. ~~Which framework…~~ → **Vite + React** (`source/`). Mocks: `demo-data.ts` (skills), `behavior.ts` / Supabase (behavioral).
+2. Which OpenRouter model(s) for **demo day** (latency vs quality), and are Production env vars confirmed on Vercel?
+3. Final list of 6 behaviors and their rubric wording (to review with the mentors). Seeded draft is in `supabase/seed.sql`.
+4. ~~Arabic, English or both…~~ → **Both for chrome**; **Arabic for presentation / AI rehearsal**.
+5. ~~Is real authentication needed…~~ → **Demo switcher is enough** for the hackathon.
+6. Final project name.
+7. Pin a saved Arabic analysis/plan for stage so live LLM variance is optional?
+
+---
+
 ## 16. Decisions log
 
 Recorded during Phase 0 / Phase 1 kickoff:
@@ -472,20 +509,17 @@ Recorded during Phase 0 / Phase 1 kickoff:
 1. **Scoring truth:** PROJECT_SPEC §6 wins. Ahmed = **79.17** / **Develop first**. Seed and UI must match. Scores are never hard-coded in the UI; they are computed from confirmed ratings.
 2. **Skills screens:** stay on local mocks, labelled as sample data. Do not wire them to Supabase for the hackathon.
 3. **Supabase credentials:** the team creates the project and puts `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `source/.env.local`. Never commit secrets. Service role key is server-only (Phase 2+).
-4. **Language:** Arabic default, English toggle. AI output follows the current UI language. Seed free-text feedback in **both** Arabic and English.
+4. **Language:** Arabic default, English toggle for chrome. **Demo presentation is Arabic-first** — rehearse Generate in Arabic; do not rely on EN/AR AI text matching. AI body text is not auto-regenerated on language toggle.
 5. **Repo layout:** `/api`, `/shared`, `/supabase` at repo root; Vite app stays in `source/`.
-6. **Vercel:** build from `source` → `source/dist`. `/` → landing (`landing.html`), `/app.html` → app. Leave `/api/*` alone. **No** SPA catch-all rewrite (HashRouter). Keep `site/` until Vercel builds correctly, then remove it from tracking.
+6. **Vercel:** build from `source` → `source/dist`. `/` → landing (`landing.html`), `/app.html` → app. Leave `/api/*` alone. **No** SPA catch-all rewrite (HashRouter).
 7. **Slugs:** `employees.slug` and `roles.slug` so routes like `ahmad` keep working.
 8. **Rubrics:** full 25/50/75/100 anchors in the DB; the UI may keep showing one line (the 75 anchor).
 9. **Phase 3 note (exact-quote check):** before comparing AI `quote` to free text, normalize Arabic on both sides (strip diacritics, unify alef variants, remove tatweel, collapse whitespace).
 
----
+UI / demo pass (2026-10-05):
 
-## 15. Open questions
-
-1. ~~Which framework…~~ → **Vite + React** (`source/`). Mocks: `demo-data.ts` (skills), `behavior.ts` / Supabase (behavioral).
-2. Which OpenRouter model(s) will we use, do they support structured outputs for our schemas, and what are the cost and rate limits?
-3. Final list of 6 behaviors and their rubric wording (to review with the mentors). Seeded draft is in `supabase/seed.sql`.
-4. ~~Arabic, English or both…~~ → **Both**; Arabic default; AI follows UI language.
-5. ~~Is real authentication needed…~~ → **Demo switcher is enough** for the hackathon.
-6. Final project name.
+10. **Hub:** `/app/behavior` = team overview + role readiness; manager switcher lands there. Skills/hiring stay under a collapsed secondary nav group.
+11. **Analysis & plan:** generate on explicit button click only; engine fallback sections always render. What-if shows Now vs After project without a checkbox.
+12. **Pricing (landing):** tiers describe **services included**, not company headcount.
+13. **Demo reset:** `POST /api/reset-demo` + Shell confirmation dialog; requires `ALLOW_DEMO_RESET=true`.
+14. **Local env:** `api/_lib/loadLocalEnv.ts` fills missing server env from root `.env.local` under local/dev so Sensitive Vercel secrets still work with `vercel dev`.
