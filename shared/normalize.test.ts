@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isNormalizedSubstring, normalizeForQuoteMatch } from "./normalize.ts"
+import { extractOriginalQuote, isNormalizedSubstring, normalizeForQuoteMatch } from "./normalize.ts"
 import { validateProposals } from "./validateInterpret.ts"
 
 describe("normalizeForQuoteMatch", () => {
@@ -96,5 +96,32 @@ describe("validateProposals", () => {
       },
     ])
     expect(valid).toHaveLength(1)
+  })
+
+  it("saves the ORIGINAL span when the model quote has diacritics/spacing differences", () => {
+    const ar =
+      "عندما يسلّم أعضاء الفريق عملهم، غالباً ما يعيد إنجازه بنفسه طوال الليل بدل إعطاء ملاحظات."
+    // Model-ish quote: different alef, spacing, no tatweel/diacritics matching original exactly
+    const modelQuote = "غالبا  ما يعيد انجازه بنفسه طوال الليل"
+    const { valid, dropped } = validateProposals(ar, [
+      { behavior_key: "delegation", level: 50, quote: modelQuote, rationale: "يعيد العمل." },
+    ])
+    expect(dropped).toHaveLength(0)
+    expect(valid).toHaveLength(1)
+    expect(valid[0]!.quote).not.toBe(modelQuote)
+    expect(ar.includes(valid[0]!.quote)).toBe(true)
+    expect(normalizeForQuoteMatch(valid[0]!.quote)).toBe(normalizeForQuoteMatch(modelQuote))
+  })
+})
+
+describe("extractOriginalQuote", () => {
+  it("maps Arabic diacritic/spacing match back to the original span", () => {
+    const original =
+      "غالباً ما يعيد إنجازه بنفسه طوال الليل بدل إعطاء ملاحظات."
+    const modelish = "غالبا ما يعيد انجازه بنفسه طوال الليل"
+    const span = extractOriginalQuote(original, modelish)
+    expect(span).toBeTruthy()
+    expect(original.includes(span!)).toBe(true)
+    expect(normalizeForQuoteMatch(span!)).toBe(normalizeForQuoteMatch(modelish))
   })
 })

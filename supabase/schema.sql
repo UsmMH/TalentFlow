@@ -75,6 +75,7 @@ create table development_analyses (
   narrative jsonb not null,
   language text default 'en',
   model text,
+  snapshot_hash text,
   created_at timestamptz default now()
 );
 
@@ -84,6 +85,8 @@ create table development_plans (
   role_id uuid references roles(id),
   items jsonb not null,
   language text default 'en',
+  model text,
+  snapshot_hash text,
   created_at timestamptz default now()
 );
 

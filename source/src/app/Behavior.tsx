@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { useApp } from "./lib/i18n"
 import { PROMOTION_COST as P } from "./lib/assumptions.ts"
@@ -13,6 +13,32 @@ const th = "px-4 py-3 text-start text-sm font-bold text-i500"
 const pathV = { now: "met", develop: "partial", specialist: "notAssessed", insufficient: "lowConf" } as const
 const tone = (s: string) => (s === "critical" ? "critical" : s === "partial" ? "partial" : "met") as "met" | "partial" | "critical"
 const displayLevel = (cur: number | null, level: number | null) => level ?? (cur === null ? null : Math.floor(cur / 25) * 25)
+
+type AnalysisPayload = {
+  summary: string
+  strengths: { behavior_key: string; evidence: string }[]
+  development_areas: { behavior_key: string; evidence: string; why_it_matters: string }[]
+  blind_spots: { behavior_key: string; explanation: string }[]
+  readiness_view: {
+    signal: string
+    evidence_for: string[]
+    evidence_against: string[]
+    missing_evidence: string[]
+  }
+  path_options: { option: string; rationale: string }[]
+  caution: string
+}
+
+type PlanPayload = {
+  items: {
+    behavior_key: string
+    type: string
+    title: string
+    description: string
+    duration_weeks: number
+    success_evidence: string
+  }[]
+}
 
 function AiTag({ confirmed }: { confirmed: boolean }) {
   const { tr } = useApp()
@@ -110,7 +136,7 @@ export function BehaviorProfile() {
 
 /* ============ Individual Development Analysis ============ */
 export function Analysis() {
-  const { tr, bi, n } = useApp()
+  const { tr, bi, n, lang } = useApp()
   const nav = useNavigate()
   const data = useBehaviorData()
   const e = data.emp("ahmad")
@@ -118,12 +144,66 @@ export function Analysis() {
   const [hypo, setHypo] = useState(false)
   const m2 = readiness(whatIf(e.ratings), e.ratingDates, data.roleReqs)
   const [cost, setCost] = useState(P.replacementHiring + P.productivityLoss + P.teamTurnover)
-  const [plan, setPlan] = useState(P.developmentPlan)
+  const [planCost, setPlanCost] = useState(P.developmentPlan)
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
-  const strengths = m.parts.filter((p) => p.status === "met")
-  const gaps = m.parts.filter((p) => p.status !== "met")
-  const blind = m.parts.filter((p) => p.blind)
+  const [analysis, setAnalysis] = useState<AnalysisPayload | null>(null)
+  const [plan, setPlan] = useState<PlanPayload | null>(null)
+  const [loadingAi, setLoadingAi] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [savedNote, setSavedNote] = useState(false)
+  const [aiMeta, setAiMeta] = useState<string>("")
+
+  async function loadAi(force = false) {
+    setLoadingAi(true)
+    setAiError(null)
+    const body = { slug: "ahmad", role_slug: "team-manager", language: lang, force }
+    const [aRes, pRes] = await Promise.all([
+      postJson<{
+        analysis: AnalysisPayload
+        source: string
+        saved: boolean
+        model: string
+        latency_ms: number
+      }>("/api/analysis", body, { timeoutMs: 25_000 }),
+      postJson<{
+        plan: PlanPayload
+        source: string
+        saved: boolean
+        model: string
+        latency_ms: number
+      }>("/api/plan", body, { timeoutMs: 25_000 }),
+    ])
+    setLoadingAi(false)
+    if (!aRes.ok) {
+      setAiError(aRes.error)
+      return
+    }
+    setAnalysis(aRes.data.analysis)
+    setSavedNote(Boolean(aRes.data.saved) || aRes.data.source === "seed")
+    setAiMeta(`${aRes.data.source}/${aRes.data.model}`)
+    if (pRes.ok) {
+      setPlan(pRes.data.plan)
+      if (pRes.data.saved || pRes.data.source === "seed") setSavedNote(true)
+    }
+  }
+
+  useEffect(() => {
+    if (data.loading) return
+    void loadAi(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when UI language changes
+  }, [data.loading, lang])
+
+  const strengths = analysis?.strengths?.length
+    ? analysis.strengths
+    : m.parts.filter((p) => p.status === "met").map((p) => ({ behavior_key: p.id, evidence: "" }))
+  const gaps = analysis?.development_areas?.length
+    ? analysis.development_areas
+    : m.parts.filter((p) => p.status !== "met").map((p) => ({ behavior_key: p.id, evidence: "", why_it_matters: "" }))
+  const blind = analysis?.blind_spots?.length
+    ? analysis.blind_spots
+    : m.parts.filter((p) => p.blind).map((p) => ({ behavior_key: p.id, explanation: "" }))
+
   if (data.loading) return <Skeleton className="h-48" />
   const input = "w-[160px] rounded-[12px] border border-i100 bg-white px-3 py-2 text-base"
 
@@ -140,30 +220,143 @@ export function Analysis() {
       <Link to={`${B}/ahmad`} className="mb-4 inline-block text-sm font-bold text-flow underline">{tr("ملف أحمد السلوكي", "Ahmad's behavioral profile")}</Link>
       <PageTitle sub={tr("شرح مبني على القواعد والأدلة المحسوبة. القرار للمدير.", "An explanation built from rules and calculated evidence. The decision is the manager's.")}>{tr("تحليل التطوير الفردي", "Individual development analysis")} · {bi(e.name)}</PageTitle>
 
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Btn kind="outline" disabled={loadingAi} onClick={() => void loadAi(true)}>
+          {loadingAi ? tr("جارٍ التوليد…", "Generating…") : tr("توليد / تحديث", "Generate / Refresh")}
+        </Btn>
+        <span className="rounded-full border border-dashed border-i500 px-3 py-1 text-[13px] font-bold text-i500">
+          {tr("مولَّد بالذكاء الاصطناعي · القرار للإنسان", "AI-generated · a human decides")}
+        </span>
+        {savedNote && (
+          <span className="rounded-full bg-mist px-3 py-1 text-[13px] font-bold text-i700">
+            {tr("نتيجة محفوظة", "Saved result")}
+          </span>
+        )}
+        {aiMeta && <span className="text-[12px] text-i500">{aiMeta}</span>}
+      </div>
+      {aiError && (
+        <Card className="mb-4 border-crit p-4 text-base text-ink">
+          {tr(
+            `تعذّر التوليد (${aiError}). يمكنك إعادة المحاولة أو الاعتماد على الإشارة المحسوبة أدناه.`,
+            `Could not generate (${aiError}). You can retry or rely on the calculated signal below.`,
+          )}
+        </Card>
+      )}
+      {analysis?.summary && <p className="mb-6 max-w-[820px] text-base leading-[1.7] text-i900">{analysis.summary}</p>}
+      {analysis?.caution && <p className="mb-6 text-sm leading-[1.7] text-i500">{analysis.caution}</p>}
+
       <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <Card className="p-6"><div className="mb-2 text-sm font-bold text-flow">{tr("نقاط القوة", "Strengths")}</div><ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">{strengths.map((p) => <li key={p.id}>{bi(data.behaviors[p.id].name)}</li>)}</ul></Card>
-        <Card className="p-6"><div className="mb-2 text-sm font-bold text-i500">{tr("مجالات التطوير", "Development areas")}</div><ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">{gaps.map((p) => <li key={p.id}>{bi(data.behaviors[p.id].name)} <span className="font-num text-sm text-i500">({p.cur} → {p.required})</span></li>)}</ul></Card>
-        <Card className="p-6"><div className="mb-2 text-sm font-bold text-i500">{tr("النقاط العمياء", "Blind spots")}</div>{blind.map((p) => <p key={p.id} className="m-0 text-base leading-[1.7] text-i900">{tr(`«${bi(data.behaviors[p.id].name)}»: يرى أحمد نفسه عند ${e.ratings[p.id].self}، بينما يراه المدير والزملاء عند ${e.ratings[p.id].manager} و${e.ratings[p.id].peer}.`, `"${bi(data.behaviors[p.id].name)}": Ahmed sees himself at ${e.ratings[p.id].self}, while his manager and peers see him at ${e.ratings[p.id].manager} and ${e.ratings[p.id].peer}.`)}</p>)}</Card>
+        <Card className="p-6">
+          <div className="mb-2 text-sm font-bold text-flow">{tr("نقاط القوة", "Strengths")}</div>
+          <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
+            {strengths.map((s, i) => (
+              <li key={`${s.behavior_key}-${i}`}>
+                {data.behaviors[s.behavior_key as BId] ? bi(data.behaviors[s.behavior_key as BId].name) : s.behavior_key}
+                {s.evidence ? <span className="text-i500"> — {s.evidence}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+        <Card className="p-6">
+          <div className="mb-2 text-sm font-bold text-i500">{tr("مجالات التطوير", "Development areas")}</div>
+          <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
+            {gaps.map((g, i) => {
+              const part = m.parts.find((p) => p.id === g.behavior_key)
+              return (
+                <li key={`${g.behavior_key}-${i}`}>
+                  {data.behaviors[g.behavior_key as BId] ? bi(data.behaviors[g.behavior_key as BId].name) : g.behavior_key}
+                  {part && <span className="font-num text-sm text-i500"> ({part.cur} → {part.required})</span>}
+                  {"why_it_matters" in g && g.why_it_matters ? <span className="text-i500"> — {g.why_it_matters}</span> : null}
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+        <Card className="p-6">
+          <div className="mb-2 text-sm font-bold text-i500">{tr("النقاط العمياء", "Blind spots")}</div>
+          {blind.length === 0 && <p className="m-0 text-base text-i500">—</p>}
+          {blind.map((b, i) => (
+            <p key={`${b.behavior_key}-${i}`} className="m-0 text-base leading-[1.7] text-i900">
+              {b.explanation
+                || tr(
+                  `«${bi(data.behaviors[b.behavior_key as BId].name)}»: يرى أحمد نفسه عند ${e.ratings[b.behavior_key as BId].self}، بينما يراه المدير والزملاء عند ${e.ratings[b.behavior_key as BId].manager} و${e.ratings[b.behavior_key as BId].peer}.`,
+                  `"${bi(data.behaviors[b.behavior_key as BId].name)}": Ahmed sees himself at ${e.ratings[b.behavior_key as BId].self}, while his manager and peers see him at ${e.ratings[b.behavior_key as BId].manager} and ${e.ratings[b.behavior_key as BId].peer}.`,
+                )}
+            </p>
+          ))}
+        </Card>
       </div>
 
       <Card className="mb-6 p-6">
         <div className="mb-2 text-sm font-bold text-i500">{tr("ما الذي سيقوّي الملف؟", "What would strengthen the case?")}</div>
         <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
-          <li>{tr("تقييم من الزملاء لمعالجة الخلافات، فهو غير متوفر حالياً.", "A peer rating for conflict handling, which is missing today.")}</li>
-          <li>{tr("أدلة جديدة على التفويض بعد مشروع صغير يقوده بنفسه.", "New evidence of delegation after a small project he leads himself.")}</li>
+          {(analysis?.readiness_view?.missing_evidence?.length
+            ? analysis.readiness_view.missing_evidence
+            : [
+                tr("تقييم من الزملاء لمعالجة الخلافات، فهو غير متوفر حالياً.", "A peer rating for conflict handling, which is missing today."),
+                tr("أدلة جديدة على التفويض بعد مشروع صغير يقوده بنفسه.", "New evidence of delegation after a small project he leads himself."),
+              ]
+          ).map((line, i) => <li key={i}>{line}</li>)}
         </ul>
+        {analysis?.readiness_view && (
+          <div className="mt-4 grid gap-3 text-sm leading-[1.7] text-i700 md:grid-cols-2">
+            <div>
+              <div className="font-bold text-i500">{tr("أدلة مع الإشارة", "Evidence for")}</div>
+              <ul className="m-0 list-disc ps-5">{analysis.readiness_view.evidence_for.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </div>
+            <div>
+              <div className="font-bold text-i500">{tr("أدلة ضد الإشارة", "Evidence against")}</div>
+              <ul className="m-0 list-disc ps-5">{analysis.readiness_view.evidence_against.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </div>
+          </div>
+        )}
       </Card>
 
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("المسار المقترح", "Suggested path")}</h2>
       <div className="mb-6 grid gap-4 md:grid-cols-3">
-        {([["now", tr("الأدلة لا تدعم ذلك بعد: التفويض حرج وهو دون المطلوب.", "The evidence doesn't support it yet: delegation is critical and below the requirement.")], ["develop", tr("الملاءمة مرتفعة وفجوتان قابلتان للإغلاق خلال ثلاثة أشهر.", "High fit and two gaps that can be closed within three months.")], ["specialist", tr("خيار مناسب إذا فضّل أحمد التخصص التقني.", "A fit if Ahmad prefers to stay technical.")]] as const).map(([k, why]) => (
-          <Card key={k} className={`flex flex-col gap-3 p-6 ${k === "develop" ? "border-2 border-flow" : ""}`}>
-            <b className="text-xl text-ink">{bi(PATH_NAME[k])}</b>
-            <span className={`self-start rounded-full px-3 py-1 text-[13px] font-bold ${k === "develop" ? "bg-flow text-white" : "bg-i100 text-i700"}`}>{k === "develop" ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}</span>
-            <p className="m-0 text-base leading-[1.7] text-i700">{why}</p>
-          </Card>
-        ))}
+        {(analysis?.path_options?.length
+          ? analysis.path_options.map((opt, i) => {
+              const recommended = opt.option === (analysis.readiness_view?.signal ?? m.signal) || i === 0
+              return (
+                <Card key={i} className={`flex flex-col gap-3 p-6 ${recommended ? "border-2 border-flow" : ""}`}>
+                  <b className="text-xl text-ink">{opt.option}</b>
+                  <span className={`self-start rounded-full px-3 py-1 text-[13px] font-bold ${recommended ? "bg-flow text-white" : "bg-i100 text-i700"}`}>
+                    {recommended ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}
+                  </span>
+                  <p className="m-0 text-base leading-[1.7] text-i700">{opt.rationale}</p>
+                </Card>
+              )
+            })
+          : ([["now", tr("الأدلة لا تدعم ذلك بعد: التفويض حرج وهو دون المطلوب.", "The evidence doesn't support it yet: delegation is critical and below the requirement.")], ["develop", tr("الملاءمة مرتفعة وفجوتان قابلتان للإغلاق خلال ثلاثة أشهر.", "High fit and two gaps that can be closed within three months.")], ["specialist", tr("خيار مناسب إذا فضّل أحمد التخصص التقني.", "A fit if Ahmad prefers to stay technical.")]] as const).map(([k, why]) => (
+              <Card key={k} className={`flex flex-col gap-3 p-6 ${k === "develop" ? "border-2 border-flow" : ""}`}>
+                <b className="text-xl text-ink">{bi(PATH_NAME[k])}</b>
+                <span className={`self-start rounded-full px-3 py-1 text-[13px] font-bold ${k === "develop" ? "bg-flow text-white" : "bg-i100 text-i700"}`}>{k === "develop" ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}</span>
+                <p className="m-0 text-base leading-[1.7] text-i700">{why}</p>
+              </Card>
+            ))
+        )}
       </div>
+
+      {plan?.items?.length ? (
+        <>
+          <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("خطة التطوير", "Development plan")}</h2>
+          <ol className="m-0 mb-6 flex list-none flex-col gap-4 p-0">
+            {plan.items.map((item, i) => (
+              <li key={i}>
+                <Card className="flex flex-wrap items-center gap-4 p-6">
+                  <span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span>
+                  <div className="min-w-[200px] flex-1">
+                    <b className="text-base text-ink">{item.title}</b>
+                    <div className="text-sm text-i500">{item.duration_weeks} {tr("أسابيع", "weeks")} · {item.type}</div>
+                    <p className="m-0 mt-1 text-sm leading-[1.6] text-i700">{item.description}</p>
+                    <p className="m-0 mt-1 text-sm leading-[1.6] text-i500">{tr("دليل النجاح", "Success evidence")}: {item.success_evidence}</p>
+                  </div>
+                </Card>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : null}
 
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("ماذا لو؟", "What if?")}</h2>
       <Card className="mb-6 flex flex-col gap-4 p-6">
@@ -179,8 +372,8 @@ export function Analysis() {
       <Card className="mb-6 flex flex-col gap-4 p-6">
         <div className="flex flex-wrap items-end gap-6">
           <label className="flex flex-col gap-1 text-sm font-bold text-i500">{tr("تكلفة ترقية فاشلة (ريال)", "Failed promotion (SAR)")}<input type="number" className={input} value={cost} onChange={(ev) => setCost(+ev.target.value)} /></label>
-          <label className="flex flex-col gap-1 text-sm font-bold text-i500">{tr("تكلفة خطة التطوير (ريال)", "Development plan (SAR)")}<input type="number" className={input} value={plan} onChange={(ev) => setPlan(+ev.target.value)} /></label>
-          <div><div className="text-sm text-i500">{tr("الفرق", "Difference")}</div><div className="font-num text-[40px] font-extrabold leading-none text-ink">{n(Math.max(cost - plan, 0))} <span className="text-base font-bold text-i500">{tr("ريال", "SAR")}</span></div></div>
+          <label className="flex flex-col gap-1 text-sm font-bold text-i500">{tr("تكلفة خطة التطوير (ريال)", "Development plan (SAR)")}<input type="number" className={input} value={planCost} onChange={(ev) => setPlanCost(+ev.target.value)} /></label>
+          <div><div className="text-sm text-i500">{tr("الفرق", "Difference")}</div><div className="font-num text-[40px] font-extrabold leading-none text-ink">{n(Math.max(cost - planCost, 0))} <span className="text-base font-bold text-i500">{tr("ريال", "SAR")}</span></div></div>
         </div>
         <p className="m-0 text-sm leading-[1.7] text-i500">{tr(`تقدير بافتراضات قابلة للتعديل: توظيف بديل ${n(P.replacementHiring)}، وتراجع إنتاجية الفريق ${n(P.productivityLoss)}، ومغادرة أعضاء من الفريق ${n(P.teamTurnover)}.`, `An estimate with editable assumptions: replacement hiring ${n(P.replacementHiring)}, team productivity loss ${n(P.productivityLoss)}, team members leaving ${n(P.teamTurnover)}.`)}</p>
       </Card>
@@ -419,12 +612,30 @@ export function RateForm() {
 
 /* ============ Employee: my behavioral profile + plan ============ */
 export function MyBehavior() {
-  const { tr, bi } = useApp()
+  const { tr, bi, lang } = useApp()
   const data = useBehaviorData()
+  const [planItems, setPlanItems] = useState<PlanPayload["items"] | null>(null)
+  const [planSaved, setPlanSaved] = useState(false)
+
+  useEffect(() => {
+    if (data.loading) return
+    void (async () => {
+      const res = await postJson<{
+        plan: PlanPayload
+        saved: boolean
+        source: string
+      }>("/api/plan", { slug: "ahmad", role_slug: "team-manager", language: lang }, { timeoutMs: 25_000 })
+      if (res.ok) {
+        setPlanItems(res.data.plan.items)
+        setPlanSaved(Boolean(res.data.saved) || res.data.source === "seed")
+      }
+    })()
+  }, [data.loading, lang])
+
   if (data.loading) return <Skeleton className="h-48" />
   const e = data.emp("ahmad")
   const m = readiness(e.ratings, e.ratingDates, data.roleReqs)
-  const steps = [
+  const fallbackSteps = [
     [tr("قيادة مشروع صغير مع تفويض مهام حقيقية لزملائك", "Lead a small project and delegate real tasks to colleagues"), tr("6 أسابيع", "6 weeks"), "progress"],
     [tr("جلسات إرشاد شهرية مع مدير خبير", "Monthly mentoring with an experienced manager"), tr("3 أشهر", "3 months"), "todo"],
     [tr("إعادة تقييم من المدير والزملاء", "Re-evaluation by your manager and peers"), "", "locked"],
@@ -448,10 +659,27 @@ export function MyBehavior() {
         ))}
       </Card>
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("خطة التطوير", "Development plan")}</h2>
+      {planSaved && (
+        <p className="mb-3 text-sm font-bold text-i500">{tr("نتيجة محفوظة", "Saved result")}</p>
+      )}
       <ol className="m-0 mb-6 flex list-none flex-col gap-4 p-0">
-        {steps.map(([title, dur, st], i) => (
-          <li key={i}><Card className={`flex flex-wrap items-center gap-4 p-6 ${st === "locked" ? "bg-mist" : ""}`}><span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span><div className="min-w-[200px] flex-1"><b className="text-base text-ink">{title}</b>{dur && <div className="text-sm text-i500">{dur}</div>}</div><StatusBadge v={stone[st]} label={label[st]} /></Card></li>
-        ))}
+        {planItems?.length
+          ? planItems.map((item, i) => (
+              <li key={i}>
+                <Card className="flex flex-wrap items-center gap-4 p-6">
+                  <span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span>
+                  <div className="min-w-[200px] flex-1">
+                    <b className="text-base text-ink">{item.title}</b>
+                    <div className="text-sm text-i500">{item.duration_weeks} {tr("أسابيع", "weeks")}</div>
+                    <p className="m-0 mt-1 text-sm text-i700">{item.description}</p>
+                  </div>
+                  <StatusBadge v="partial" label={tr("قيد التنفيذ", "In progress")} />
+                </Card>
+              </li>
+            ))
+          : fallbackSteps.map(([title, dur, st], i) => (
+              <li key={i}><Card className={`flex flex-wrap items-center gap-4 p-6 ${st === "locked" ? "bg-mist" : ""}`}><span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span><div className="min-w-[200px] flex-1"><b className="text-base text-ink">{title}</b>{dur && <div className="text-sm text-i500">{dur}</div>}</div><StatusBadge v={stone[st]} label={label[st]} /></Card></li>
+            ))}
       </ol>
       <Card className="border-flow bg-mist p-6 text-base font-bold leading-[1.7] text-ink">{tr("الدرجة لا ترتفع بإنهاء الخطة وحدها؛ تُحدَّث بعد تقييمات جديدة تدعمها أمثلة.", "A score doesn't rise from finishing the plan alone; it updates after new ratings backed by examples.")}</Card>
     </>

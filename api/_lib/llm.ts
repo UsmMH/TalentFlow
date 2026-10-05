@@ -21,7 +21,10 @@ export type LlmResult<T> = {
 }
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-const DEFAULT_TIMEOUT_MS = 20_000
+/** Per-model attempt. On timeout / invalid JSON → next model (no same-model retry). */
+const FIRST_ATTEMPT_TIMEOUT_MS = 10_000
+/** Wall-clock budget across all models. */
+const TOTAL_CAP_MS = 25_000
 
 function parseFallbackModels(raw: string | undefined): string[] {
   if (!raw?.trim()) return []
@@ -40,7 +43,7 @@ async function once<T>(
   jsonSchema: JsonSchema,
   model: string,
   timeoutMs: number,
-): Promise<{ data: T; latency_ms: number }> {
+): Promise<{ data: T; latency_ms: number; model: string }> {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) throw new Error("Missing OPENROUTER_API_KEY")
 
@@ -99,8 +102,9 @@ async function once<T>(
       throw new Error("Invalid JSON from LLM")
     }
 
-    console.info("[llm] ok", { model: json.model ?? model, latency_ms })
-    return { data: parsed, latency_ms }
+    const answered = json.model ?? model
+    console.info("[llm] ok", { model: answered, latency_ms })
+    return { data: parsed, latency_ms, model: answered }
   } catch (err) {
     const latency_ms = Date.now() - started
     if (err instanceof Error && err.name === "AbortError") {
@@ -115,40 +119,65 @@ async function once<T>(
 
 /**
  * Call OpenRouter with structured JSON output.
- * Retries once on invalid JSON or timeout (same model, then tries fallbacks).
+ * First attempt 10s; on timeout, invalid JSON, or failed `validate`, advance to the next model
+ * (no same-model retry). Total wall-clock cap ~25s.
  * Never logs message content (may contain personal/synthetic free text).
  */
 export async function chatJson<T>(opts: {
   messages: ChatMessage[]
   jsonSchema: JsonSchema
+  /** Override per-attempt timeout (default 10s). Total cap remains ~25s. */
   timeoutMs?: number
+  /** Override total wall-clock budget (default 25s). */
+  totalCapMs?: number
+  /** If provided, invalid results advance to the next model. */
+  validate?: (data: T) => { ok: true } | { ok: false; error: string }
 }): Promise<LlmResult<T>> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const perAttempt = opts.timeoutMs ?? FIRST_ATTEMPT_TIMEOUT_MS
+  const totalCap = opts.totalCapMs ?? TOTAL_CAP_MS
   const models = modelsToTry()
   let lastError = "LLM failed"
   let lastModel = models[0] ?? "unknown"
   let lastLatency = 0
+  const wallStart = Date.now()
 
   for (const model of models) {
+    const elapsed = Date.now() - wallStart
+    const remaining = totalCap - elapsed
+    if (remaining <= 0) {
+      lastError = "LLM total timeout"
+      break
+    }
     lastModel = model
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { data, latency_ms } = await once<T>(opts.messages, opts.jsonSchema, model, timeoutMs)
-        lastLatency = latency_ms
-        return { ok: true, data, model, latency_ms }
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : "LLM failed"
-        lastLatency = timeoutMs
-        console.warn("[llm] attempt_failed", { model, attempt, error: lastError })
-        // retry once on invalid JSON / timeout; then try next model
-        if (attempt === 0 && (lastError.includes("Invalid JSON") || lastError.includes("timeout"))) {
+    const budget = Math.min(perAttempt, remaining)
+    try {
+      const { data, latency_ms, model: answered } = await once<T>(
+        opts.messages,
+        opts.jsonSchema,
+        model,
+        budget,
+      )
+      if (opts.validate) {
+        const v = opts.validate(data)
+        if (!v.ok) {
+          console.warn("[llm] validation_failed", { model: answered, error: v.error })
+          lastError = v.error
+          lastLatency = Date.now() - wallStart
           continue
         }
-        break
       }
+      lastLatency = latency_ms
+      console.info("[llm] answered_by", { model: answered })
+      return { ok: true, data, model: answered, latency_ms }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : "LLM failed"
+      lastLatency = Date.now() - wallStart
+      console.warn("[llm] model_failed", { model, error: lastError, elapsed_ms: lastLatency })
+      continue
     }
   }
 
-  console.warn("[llm] validation_or_call_failed", { model: lastModel, latency_ms: lastLatency, error: lastError })
-  return { ok: false, error: lastError, model: lastModel, latency_ms: lastLatency }
+  const latency_ms = Date.now() - wallStart
+  console.warn("[llm] all_models_failed", { model: lastModel, latency_ms, error: lastError })
+  return { ok: false, error: lastError, model: lastModel, latency_ms }
 }

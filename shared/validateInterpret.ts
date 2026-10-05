@@ -2,7 +2,7 @@
 
 import { BEHAVIOR_KEYS } from "./policy.ts"
 import type { BehaviorKey } from "./types.ts"
-import { isNormalizedSubstring } from "./normalize.ts"
+import { extractOriginalQuote } from "./normalize.ts"
 
 export type InterpretProposal = {
   behavior_key: string
@@ -47,11 +47,13 @@ export function validateProposals(
       dropped.push({ behavior_key, level, quote, rationale, reason: "bad_level" })
       continue
     }
-    if (!isNormalizedSubstring(freeText, quote)) {
+    const original = extractOriginalQuote(freeText, quote)
+    if (!original) {
       dropped.push({ behavior_key, level, quote, rationale, reason: "quote_not_in_text" })
       continue
     }
-    valid.push({ behavior_key, level, quote, rationale })
+    // Save the ORIGINAL text span as ai_quote, not the model's string.
+    valid.push({ behavior_key, level, quote: original, rationale })
   }
 
   return { valid, dropped }

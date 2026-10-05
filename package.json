@@ -5,7 +5,8 @@
   "scripts": {
     "test": "vitest run",
     "test:skills": "npm run test --prefix source",
-    "test:llm": "npx --yes tsx --env-file=.env.local scripts/test-llm.ts",
+    "test:llm": "npx --yes tsx --env-file=source/.env.local scripts/test-llm.ts",
+    "test:analysis": "npx --yes tsx --env-file=source/.env.local scripts/test-analysis.ts",
     "typecheck": "tsc -p tsconfig.shared.json --noEmit && tsc -p source/tsconfig.json --noEmit && tsc -p tsconfig.api.json --noEmit",
     "build": "npm run build --prefix source"
   },

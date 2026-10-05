@@ -1,10 +1,12 @@
 /**
- * Live LLM smoke test for interpret (EN + AR seed Ahmed feedback).
- * Usage (repo root, with .env.local loaded):
- *   npx --yes tsx --env-file=.env.local scripts/test-llm.ts
+ * Live LLM smoke test for interpret (EN + AR, manager + peer conflict).
+ * Usage (repo root):
+ *   npm run test:llm
  * Does not write to the database. Never prints API keys.
+ * Output is UTF-8 ASCII-friendly labels so it pastes cleanly on Windows terminals.
  */
 import { chatJson } from "../api/_lib/llm.ts"
+import { llmSmokeOpts } from "./llmSmokeOpts.ts"
 import { INTERPRET_SCHEMA, interpretSystemPrompt, interpretUserPrompt } from "../api/_lib/prompts/interpret.ts"
 import { validateProposals } from "../shared/validateInterpret.ts"
 
@@ -55,61 +57,129 @@ const BEHAVIORS = [
 const EN =
   "Ahmed delivers excellent analysis and rarely misses a deadline. When team members hand in their work, he often redoes it himself overnight instead of giving feedback. He took ownership when the dashboard failed last quarter."
 
+const EN_PEER =
+  `${EN} In a disagreement about priorities he went quiet and the issue stayed unresolved for weeks.`
+
 const AR =
   "يقدّم أحمد تحليلاً ممتازاً ونادراً ما يفوّت موعداً. عندما يسلّم أعضاء الفريق عملهم، غالباً ما يعيد إنجازه بنفسه طوال الليل بدل إعطاء ملاحظات. تحمّل المسؤولية عندما تعطّلت لوحة المعلومات في الربع الماضي."
 
-async function runOne(label: string, language: "en" | "ar", freeText: string) {
-  console.log(`\n=== ${label} ===`)
+const AR_PEER =
+  `${AR} في خلاف حول الأولويات صمت وبقيت المسألة دون حل لأسابيع.`
+
+const RUNS = Number(process.env.LLM_SMOKE_RUNS ?? 3)
+
+type Case = { id: string; language: "en" | "ar"; freeText: string }
+
+const CASES: Case[] = [
+  { id: "en-manager", language: "en", freeText: EN },
+  { id: "en-peer-conflict", language: "en", freeText: EN_PEER },
+  { id: "ar-manager", language: "ar", freeText: AR },
+  { id: "ar-peer-conflict", language: "ar", freeText: AR_PEER },
+]
+
+function median(nums: number[]): number {
+  if (!nums.length) return 0
+  const s = [...nums].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2
+}
+
+/** Escape / flatten Arabic for paste-friendly logs (keep quotes truncated, mark lang). */
+function clip(s: string, n = 80): string {
+  const one = s.replace(/\s+/g, " ").trim()
+  return one.length <= n ? one : `${one.slice(0, n)}...`
+}
+
+async function runOnce(c: Case) {
   const llm = await chatJson<{ proposals?: unknown[] }>({
     messages: [
-      { role: "system", content: interpretSystemPrompt(language) },
+      { role: "system", content: interpretSystemPrompt(c.language) },
       {
         role: "user",
-        content: interpretUserPrompt({ freeText, behaviors: BEHAVIORS, language }),
+        content: interpretUserPrompt({ freeText: c.freeText, behaviors: BEHAVIORS, language: c.language }),
       },
     ],
     jsonSchema: INTERPRET_SCHEMA,
-    timeoutMs: 20_000,
+    ...llmSmokeOpts(),
   })
 
   if (!llm.ok) {
-    console.log("LLM failed:", llm.error, `(${llm.latency_ms}ms, model=${llm.model})`)
-    return
+    return {
+      ok: false as const,
+      model: llm.model,
+      latency_ms: llm.latency_ms,
+      error: llm.error,
+      valid: 0,
+      dropped: 0,
+      levels: {} as Record<string, number>,
+    }
   }
 
   const raw = Array.isArray(llm.data.proposals) ? llm.data.proposals : []
   const { valid, dropped } = validateProposals(
-    freeText,
+    c.freeText,
     raw as { behavior_key: string; level: number; quote: string; rationale: string }[],
   )
-
-  console.log(`model=${llm.model} latency_ms=${llm.latency_ms}`)
-  console.log("proposals (valid):")
-  for (const p of valid) {
-    console.log(`  - ${p.behavior_key} @ ${p.level}: "${p.quote}" — ${p.rationale}`)
+  const levels = Object.fromEntries(valid.map((p) => [p.behavior_key, p.level]))
+  return {
+    ok: true as const,
+    model: llm.model,
+    latency_ms: llm.latency_ms,
+    valid: valid.length,
+    dropped: dropped.length,
+    levels,
+    proposals: valid,
   }
-  console.log("dropped:")
-  for (const d of dropped) {
-    console.log(`  - ${d.behavior_key} @ ${d.level}: ${d.reason}`)
+}
+
+async function runCase(c: Case) {
+  console.log(`\n=== CASE ${c.id} (${c.language}) x${RUNS} ===`)
+  console.log("expect ~ delegation 50, accountability ~75, conflict 25 when peer text used")
+
+  let success = 0
+  const latencies: number[] = []
+  let validTotal = 0
+  let droppedTotal = 0
+  const models = new Map<string, number>()
+
+  for (let i = 1; i <= RUNS; i++) {
+    const r = await runOnce(c)
+    latencies.push(r.latency_ms)
+    validTotal += r.valid
+    droppedTotal += r.dropped
+    models.set(r.model, (models.get(r.model) ?? 0) + 1)
+
+    if (r.ok) {
+      success += 1
+      console.log(
+        `  run ${i}: OK model=${r.model} latency_ms=${r.latency_ms} valid=${r.valid} dropped=${r.dropped} levels=${JSON.stringify(r.levels)}`,
+      )
+      for (const p of r.proposals) {
+        console.log(`    - ${p.behavior_key}@${p.level} quote=${clip(p.quote)}`)
+      }
+    } else {
+      console.log(`  run ${i}: FAIL model=${r.model} latency_ms=${r.latency_ms} error=${r.error}`)
+    }
   }
 
-  const byKey = Object.fromEntries(valid.map((p) => [p.behavior_key, p.level]))
-  console.log("spot-check (expected ~ delegation 50, accountability 100, conflict 25 when peer text used):", byKey)
+  const rate = `${success}/${RUNS}`
+  console.log(
+    `SUMMARY case=${c.id} success_rate=${rate} median_latency_ms=${Math.round(median(latencies))} valid_total=${validTotal} dropped_total=${droppedTotal} models=${JSON.stringify(Object.fromEntries(models))}`,
+  )
 }
 
 async function main() {
+  if (typeof process.stdout.setDefaultEncoding === "function") {
+    process.stdout.setDefaultEncoding("utf8")
+  }
   if (!process.env.OPENROUTER_API_KEY || !process.env.LLM_MODEL) {
-    console.error("Set OPENROUTER_API_KEY and LLM_MODEL (e.g. via --env-file=.env.local)")
+    console.error("Set OPENROUTER_API_KEY and LLM_MODEL (e.g. via --env-file=source/.env.local)")
     process.exit(1)
   }
-  await runOne("English (manager seed)", "en", EN)
-  // Peer conflict signal in EN for conflict ~25
-  await runOne(
-    "English (peer conflict add-on)",
-    "en",
-    `${EN} In a disagreement about priorities he went quiet and the issue stayed unresolved for weeks.`,
-  )
-  await runOne("Arabic (manager seed)", "ar", AR)
+  console.log("test-llm: interpret smoke (UTF-8). accountability expectation ~75 (single example).")
+  for (const c of CASES) {
+    await runCase(c)
+  }
 }
 
 main().catch((err) => {
