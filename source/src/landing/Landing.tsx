@@ -18,8 +18,8 @@ const copy = {
       { name: "فلو نمو", size: "جاهزية الدور وقرارات الترقية", price: "4,500", tag: "الأنسب لمعظم الشركات", features: ["كل ما في فلو انطلاقة", "أدوار غير محدودة", "كشف النقاط العمياء بين الرأيين", "مقارنة تكلفة الترقية الفاشلة بخطة التطوير"] },
       { name: "فلو توسّع", size: "حوكمة وتقييم متعدد المقيّمين", price: "9,500", from: true, features: ["كل ما في فلو نمو", "تقييم من عدة مقيّمين على نطاق واسع", "تسجيل المراجعات والتدقيق", "دعم مخصص للموارد البشرية"] },
     ],
-    h1: ["ابحث في الداخل أولاً عن ", "موهبتك القادمة"],
-    sub: "قارن موظفيك بالمتقدمين الخارجيين، وافهم أثر كل نقل قبل أن تقرر.",
+    h1: ["الجاهزية السلوكية قبل ", "قرار الترقية"],
+    sub: "ملف مبني على أدلة، مقارنة بمتطلبات الدور، وخطة تطوير مفسَّرة — والمدير هو من يعتمد.",
     cta: "جرّب العرض",
     cta2: "كيف نحسب الأرقام؟",
     switchTo: "الإنجليزية",
@@ -34,7 +34,7 @@ const copy = {
     sample: "بيانات تجريبية",
     aboutTitle: "عن تالنت فلو",
     aboutText:
-      "نساعد المنظمات على اكتشاف المواهب داخلها قبل أن تبحث خارجها، بقرارات مفسّرة تراعي أثر كل نقل على المنظمة كلها.",
+      "نقيس جاهزية السلوك للدور المستهدف قبل الترقية: أدلة واضحة، تحليل مفسَّر، وخطة تطوير يقرّرها المدير — لا تنبؤات ولا أحكام شخصية.",
     principles: [
       ["كل رقم مفسَّر", "Explainable", "كل درجة لها صفحة كيف حُسبت، بأدلتها وأوزانها المعلنة", "doc"],
       ["الدليل أولاً", "Evidence first", "الدرجة لا ترتفع بإنهاء دورة، بل بدليل جديد على المهارة", "check"],
@@ -61,8 +61,8 @@ const copy = {
       { name: "FlowGrow", size: "Role readiness & promotion decisions", price: "4,500", tag: "Best fit for most companies", features: ["Everything in FlowStart", "Unlimited roles", "Blind-spot detection between self-view and others' view", "Failed-promotion cost vs. development-plan cost"] },
       { name: "FlowScale", size: "Governance & multi-rater at scale", price: "9,500", from: true, features: ["Everything in FlowGrow", "Multi-rater evaluation at scale", "Review log and audit trail", "Dedicated HR support"] },
     ],
-    h1: ["Look inside first for ", "your next hire"],
-    sub: "Compare your employees with external applicants, and understand what each move does before you decide.",
+    h1: ["Behavioral readiness before ", "you promote"],
+    sub: "An evidence-based profile, role match, and an explained development plan — the manager decides.",
     cta: "Try the demo",
     cta2: "How do we calculate?",
     switchTo: "عربي",
@@ -77,7 +77,7 @@ const copy = {
     sample: "Sample data",
     aboutTitle: "About TalentFlow",
     aboutText:
-      "We help organizations find the talent they already have before looking outside, with explained decisions that weigh what every move does to the whole organization.",
+      "We measure behavioral readiness for the target role before promotion: clear evidence, explained analysis, and a development plan the manager approves — no predictions, no personality labels.",
     principles: [
       ["Explainable", "كل رقم مفسَّر", "Every score has a page showing how it was calculated, with its evidence and declared weights.", "doc"],
       ["Evidence first", "الدليل أولاً", "A score doesn't rise by finishing a course, only by new evidence of the skill.", "check"],
@@ -114,52 +114,32 @@ const LogoIcon = () => (
   </svg>
 )
 
-type Device = "desktop" | "mobile"
 const qs = new URLSearchParams(window.location.search)
-const embed = qs.has("embed")
-
-function DeviceToggle({ lang, on, onChange }: { lang: Lang; on: Device; onChange: (d: Device) => void }) {
-  return (
-    <div className="seg" role="group" aria-label={lang === "ar" ? "نوع الجهاز" : "Device"}>
-      <button className={on === "desktop" ? "on" : ""} onClick={() => onChange("desktop")}>{lang === "ar" ? "سطح المكتب" : "Desktop"}</button>
-      <button className={on === "mobile" ? "on" : ""} onClick={() => onChange("mobile")}>{lang === "ar" ? "الجوال" : "Mobile"}</button>
-    </div>
-  )
-}
 
 export default function Landing() {
   const [lang, setLang] = useState<Lang>(qs.get("lang") === "en" ? "en" : "ar")
-  const [device, setDevice] = useState<Device>(qs.get("device") === "mobile" ? "mobile" : "desktop")
   const t = copy[lang]
   useEffect(() => {
     document.documentElement.lang = lang
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr"
-    document.title = lang === "ar" ? "تالنت فلو" : "TalentFlow"
+    document.title = "TalentFlow"
   }, [lang])
 
-  // Mobile preview = this page in a 390px iframe, so the real responsive CSS applies.
-  if (device === "mobile" && !embed)
-    return (
-      <div className="phone-stage">
-        <DeviceToggle lang={lang} on="mobile" onChange={setDevice} />
-        <iframe title="mobile" src={`landing.html?embed=1&lang=${lang}&device=mobile`} className="phone" />
-      </div>
-    )
+  const appHref = `app.html?lang=${lang}#/app/behavior`
 
   return (
     <>
       <header className="hero" id="top">
         <nav className="nav">
-          <a href="#top" className="logo" aria-label={lang === "ar" ? "تالنت فلو" : "TalentFlow"}>
+          <a href="#top" className="logo" dir="ltr" aria-label="TalentFlow">
             <LogoIcon />
-            <span className={lang === "ar" ? "logo-ar" : "logo-word"}>{lang === "ar" ? "تالنت فلو" : "TalentFlow"}</span>
+            <span className="logo-word">TalentFlow</span>
           </a>
           <div className="nav-links">
             <a href="#top">{t.nav[0]}</a>
             <a href="#about">{t.nav[1]}</a>
             <a href="#pricing">{t.nav[2]}</a>
           </div>
-          {!embed && <DeviceToggle lang={lang} on={device} onChange={setDevice} />}
           <button className="lang" onClick={() => setLang(lang === "ar" ? "en" : "ar")}>{t.switchTo}</button>
         </nav>
 
@@ -171,7 +151,7 @@ export default function Landing() {
             </h1>
             <p className="sub">{t.sub}</p>
             <div className="actions">
-              <a href={`app.html?device=${device}&lang=${lang}#/app`} className="btn primary">{t.cta}</a>
+              <a href={appHref} className="btn primary">{t.cta}</a>
               <a href="#about" className="btn outline">{t.cta2}</a>
             </div>
           </div>
@@ -250,7 +230,7 @@ export default function Landing() {
                 </div>
                 <span className="pill green"><Icon n="check" size={12} />{t.trial}</span>
                 <ul>{p.features.map((f) => <li key={f}><Icon n="check" size={16} />{f}</li>)}</ul>
-                <a href={`app.html?device=${device}&lang=${lang}#/app`} className={`btn ${i === 1 ? "primary" : "outline"}`}>{t.trialCta}</a>
+                <a href={appHref} className={`btn ${i === 1 ? "primary" : "outline"}`}>{t.trialCta}</a>
               </div>
             </Reveal>
           ))}

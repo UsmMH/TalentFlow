@@ -69,7 +69,7 @@ export const options = () => {
 export const LEVEL_NAME = {
   0: ["—", "—"],
   25: ["مبتدئ", "Beginner"],
-  50: ["قيد التطوير", "Developing"],
+  50: ["نامٍ", "Developing"],
   75: ["متمكن", "Proficient"],
   100: ["نموذجي", "Exemplary"],
 } as const

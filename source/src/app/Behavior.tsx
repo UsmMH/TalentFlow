@@ -172,24 +172,27 @@ function AiTag({ confirmed }: { confirmed: boolean }) {
     : <span className="rounded-full border border-dashed border-i500 px-2 py-1 text-[13px] font-bold text-i500">{tr("مقترح من الذكاء الاصطناعي · بانتظار التأكيد", "AI-suggested · awaiting confirmation")}</span>
 }
 
-/* ============ Team readiness (KPIs) ============ */
+/* ============ Team readiness (KPIs + who is where) ============ */
 export function BehaviorOverview() {
   const { tr, bi } = useApp()
+  const nav = useNavigate()
   const data = useBehaviorData()
-  const rows = data.employees.map((e) => ({ e, m: readiness(e.ratings, e.ratingDates, data.roleReqs) }))
+  const rows = data.employees
+    .map((e) => ({ e, m: readiness(e.ratings, e.ratingDates, data.roleReqs) }))
+    .sort((a, z) => z.m.exact - a.m.exact)
   const count = (p: string) => rows.filter((r) => r.m.path === p).length
   if (data.loading) {
     return (
       <>
-        <PageTitle>{tr("جاهزية الدور", "Role readiness")}</PageTitle>
+        <PageTitle>{tr("لمحة عن الفريق", "Team at a glance")}</PageTitle>
         <Skeleton className="mb-4 h-24" /><Skeleton className="h-48" />
       </>
     )
   }
   return (
     <>
-      <PageTitle sub={tr("قبل قرار الترقية: هل تدعم الأدلة سلوكياً هذا الانتقال؟", "Before the promotion decision: does the evidence support this move behaviorally?")}>
-        {tr("جاهزية الدور", "Role readiness")} · {bi(ROLE)}
+      <PageTitle sub={tr("قبل قرار الترقية: هل تدعم الأدلة هذا الانتقال سلوكياً؟", "Before the promotion decision: does the evidence support this move behaviorally?")}>
+        {tr("لمحة عن الفريق", "Team at a glance")} · {bi(ROLE)}
       </PageTitle>
       <DataNotice
         error={data.error}
@@ -197,13 +200,53 @@ export function BehaviorOverview() {
         emptyHint={tr("لا يوجد موظفون في هذا العرض بعد.", "No employees in this view yet.")}
       />
       {data.error && !data.employees.length ? null : (
-        <div className="mb-8 grid gap-4 md:grid-cols-3">
-          <KpiTile label={tr("جاهزون الآن", "Ready now")} value={`${count("now")}`} context={tr(`من ${rows.length} موظفين`, `of ${rows.length} employees`)} />
-          <KpiTile label={tr("يحتاجون تطويراً أولاً", "Need development first")} value={`${count("develop")}`} context={tr("ثم إعادة التقييم", "then re-evaluate")} />
-          <KpiTile label={tr("مسار أخصائي أول", "Senior specialist track")} value={`${count("specialist")}`} context={tr("ليس كل موظف يصبح مديراً", "Not everyone should become a manager")} />
-        </div>
+        <>
+          <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <KpiTile label={tr("جاهزون الآن", "Ready now")} value={`${count("now")}`} context={tr(`من ${rows.length} موظفين`, `of ${rows.length} employees`)} />
+            <KpiTile label={tr("يحتاجون تطويراً أولاً", "Need development first")} value={`${count("develop")}`} context={tr("ثم إعادة التقييم", "then re-evaluate")} />
+            <KpiTile label={tr("مسار بديل", "Alternative path")} value={`${count("specialist")}`} context={tr("ليس كل موظف يصبح مديراً", "Not everyone should become a manager")} />
+            <KpiTile label={tr("أدلة غير كافية", "Insufficient evidence")} value={`${count("insufficient")}`} context={tr("يحتاجون تقييماً أوسع", "need a broader assessment")} />
+          </div>
+
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <h2 className="m-0 text-xl font-bold text-ink">{tr("جاهزية الفريق للدور", "Team readiness for the role")}</h2>
+            <Btn kind="outline" className="px-4 py-2 text-sm" onClick={() => nav(`${B}/files`)}>
+              {tr("ملفات الموظفين", "Employee files")}
+            </Btn>
+          </div>
+          <Card className="overflow-hidden">
+            <ul className="m-0 flex list-none flex-col divide-y divide-i100 p-0">
+              {rows.map(({ e, m }) => (
+                <li key={e.slug}>
+                  <button
+                    type="button"
+                    onClick={() => nav(`${B}/${e.slug}`)}
+                    className={`flex w-full flex-wrap items-center gap-3 px-4 py-3.5 text-start hover:bg-mist ${e.slug === "ahmad" ? "flash-row bg-mist/60" : "bg-transparent"}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-base font-bold text-ink">{bi(e.name)}</div>
+                      <div className="mt-0.5 truncate text-sm text-i500">{bi(e.role)}</div>
+                    </div>
+                    <span className="font-num text-2xl font-extrabold text-ink">{m.rounded}%</span>
+                    <div className="flex flex-wrap gap-2">
+                      {m.criticalMissing.length
+                        ? <StatusBadge v="critical" label={tr("فجوة حرجة", "Critical gap")} />
+                        : <StatusBadge v="met" label={tr("مستوفى", "Met")} />}
+                      <StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} />
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Card>
+          <p className="mt-4 max-w-[720px] text-sm leading-[1.7] text-i500">
+            {tr(
+              "هذه إشارات جاهزية مبنية على الأدلة وما ينقصها، وليست توقّعاً لنجاح أحد. القرار النهائي للمدير والموارد البشرية.",
+              "These are readiness signals based on evidence and what is missing, not a prediction of anyone's success. The final decision is the manager's and HR's.",
+            )}
+          </p>
+        </>
       )}
-      <p className="mt-4 max-w-[720px] text-sm leading-[1.7] text-i500">{tr("هذه إشارات جاهزية مبنية على الأدلة وما ينقصها، وليست توقعاً لنجاح أحد. القرار النهائي للمدير والموارد البشرية.", "These are readiness signals based on evidence and what is missing, not a prediction of anyone's success. The final decision is the manager's and HR's.")}</p>
     </>
   )
 }
@@ -233,28 +276,59 @@ export function EmployeeFiles() {
         emptyHint={tr("لا يوجد موظفون في هذا العرض بعد.", "No employees in this view yet.")}
       />
       {data.error && !data.employees.length ? null : (
-        <Card className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-b border-i100">
-                {[tr("الموظف", "Employee"), tr("تغطية الأدلة", "Evidence coverage"), tr("السلوك الحرج", "Critical behavior"), tr("الثقة", "Confidence"), tr("المسار المقترح", "Suggested path")].map((h) => (
-                  <th key={h} className={th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ e, m }) => (
-                <tr key={e.slug} onClick={() => nav(`${B}/${e.slug}`)} className={`cursor-pointer border-b border-i100 last:border-0 hover:bg-mist ${e.slug === "ahmad" ? "flash-row" : ""}`}>
-                  <td className="px-4 py-4"><div className="text-base font-bold text-ink">{bi(e.name)}</div><div className="text-sm text-i500">{bi(e.role)}</div></td>
-                  <td className="px-4 py-4" onClick={(ev) => ev.stopPropagation()}><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} /></td>
-                  <td className="px-4 py-4">{m.criticalMissing.length ? <StatusBadge v="critical" /> : <StatusBadge v="met" />}</td>
-                  <td className="px-4 py-4"><StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} /></td>
-                  <td className="px-4 py-4"><StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} /></td>
+        <>
+          {/* Phone: stacked cards — table is too wide */}
+          <div className="flex flex-col gap-3 lg:hidden">
+            {rows.map(({ e, m }) => (
+              <button
+                key={e.slug}
+                type="button"
+                onClick={() => nav(`${B}/${e.slug}`)}
+                className={`rounded-[16px] border border-i100 bg-white p-4 text-start shadow-[0_1px_2px_rgba(7,59,46,0.06)] ${e.slug === "ahmad" ? "flash-row" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-bold text-ink">{bi(e.name)}</div>
+                    <div className="mt-0.5 text-sm text-i500">{bi(e.role)}</div>
+                  </div>
+                  <div className="shrink-0 text-end">
+                    <ScoreCell value={`${m.rounded}%`} />
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {m.criticalMissing.length
+                    ? <StatusBadge v="critical" label={tr("فجوة حرجة", "Critical gap")} />
+                    : <StatusBadge v="met" label={tr("مستوفى", "Met")} />}
+                  <StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} />
+                  <StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} />
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <Card className="hidden overflow-x-auto lg:block">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b border-i100">
+                  {[tr("الموظف", "Employee"), tr("نسبة المطابقة", "Match %"), tr("السلوك الحرج", "Critical behavior"), tr("الثقة", "Confidence"), tr("المسار المقترح", "Suggested path")].map((h) => (
+                    <th key={h} className={th}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
+              </thead>
+              <tbody>
+                {rows.map(({ e, m }) => (
+                  <tr key={e.slug} onClick={() => nav(`${B}/${e.slug}`)} className={`cursor-pointer border-b border-i100 last:border-0 hover:bg-mist ${e.slug === "ahmad" ? "flash-row" : ""}`}>
+                    <td className="px-4 py-4"><div className="text-base font-bold text-ink">{bi(e.name)}</div><div className="text-sm text-i500">{bi(e.role)}</div></td>
+                    <td className="px-4 py-4"><ScoreCell value={`${m.rounded}%`} /></td>
+                    <td className="px-4 py-4">{m.criticalMissing.length ? <StatusBadge v="critical" label={tr("فجوة حرجة", "Critical gap")} /> : <StatusBadge v="met" label={tr("مستوفى", "Met")} />}</td>
+                    <td className="px-4 py-4"><StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} /></td>
+                    <td className="px-4 py-4"><StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </>
       )}
     </>
   )
@@ -293,23 +367,23 @@ export function BehaviorProfile() {
             <div className="mt-3 flex flex-wrap gap-2">
               <StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} />
               <StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} />
-              {m.criticalMissing.length ? <StatusBadge v="critical" /> : <StatusBadge v="met" label={tr("السلوك الحرج متحقق", "Critical behavior met")} />}
+              {m.criticalMissing.length ? <StatusBadge v="critical" label={tr("فجوة حرجة", "Critical gap")} /> : <StatusBadge v="met" label={tr("السلوك الحرج مستوفى", "Critical behavior met")} />}
             </div>
           </div>
           <div>
-            <div className="text-sm text-i500">{tr("نسبة الملاءمة", "Match %")}</div>
+            <div className="text-sm text-i500">{tr("نسبة المطابقة", "Match %")}</div>
             <ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} size={56} />
           </div>
         </div>
 
         <div>
-          <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("السلوكيات مقابل المطلوب", "Behaviors vs. required")}</h2>
+          <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("السلوكيات مقارنة بالمتطلبات", "Behaviors vs. requirements")}</h2>
           <div className="grid gap-4 md:grid-cols-2">
             {m.parts.map((p) => (
               <div key={p.id} className="flex flex-col gap-2 rounded-[12px] bg-mist p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <b className="text-base text-ink">{bi(data.behaviors[p.id].name)}</b>
-                  <StatusBadge v={p.status as Variant} label={p.status === "critical" ? tr("سلوك حرج ناقص", "Critical behavior missing") : undefined} />
+                  <StatusBadge v={p.status as Variant} label={p.status === "critical" ? tr("فجوة حرجة", "Critical gap") : undefined} />
                 </div>
                 <SkillBar current={p.cur} required={p.required} tone={tone(p.status)} />
                 <div className="flex flex-wrap justify-between gap-2 text-sm text-i700">
@@ -639,13 +713,13 @@ export function Analysis() {
                 <div className="grid gap-4 text-sm leading-[1.7] text-i700 md:grid-cols-2">
                   {evidenceFor.length > 0 && (
                     <div>
-                      <div className="font-bold text-i500">{tr("أدلة مع الإشارة", "Evidence for")}</div>
+                      <div className="font-bold text-i500">{tr("ما يدعم الإشارة", "Evidence for")}</div>
                       <ul className="m-0 list-disc ps-5">{evidenceFor.map((x, i) => <li key={i}>{x}</li>)}</ul>
                     </div>
                   )}
                   {evidenceAgainst.length > 0 && (
                     <div>
-                      <div className="font-bold text-i500">{tr("أدلة ضد الإشارة", "Evidence against")}</div>
+                      <div className="font-bold text-i500">{tr("ما يعارض الإشارة", "Evidence against")}</div>
                       <ul className="m-0 list-disc ps-5">{evidenceAgainst.map((x, i) => <li key={i}>{x}</li>)}</ul>
                     </div>
                   )}
@@ -712,7 +786,7 @@ export function Analysis() {
                 <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart2?.cur ?? null, delegPart2?.level ?? null)} /></div>
               </div>
             </div>
-            <p className="m-0 mt-4 text-sm leading-[1.7] text-i500">{tr("افتراض: يتحقق فقط إذا أظهرت تقييمات المدير والزملاء بعد المشروع مستوى 75 في التفويض. لا يُحفظ ولا يغيّر الدرجات الحالية.", "Assumption: it only holds if the manager's and peers' ratings after the project show level 75 in delegation. It isn't saved and doesn't change current scores.")}</p>
+            <p className="m-0 mt-4 text-sm leading-[1.7] text-i500">{tr("افتراض: يتحقق فقط إذا أظهرت تقييمات المدير والزملاء بعد المشروع مستوى «متمكن» في التفويض. لا يُحفظ ولا يغيّر الدرجات الحالية.", "Assumption: it only holds if the manager's and peers' ratings after the project show Proficient in delegation. It isn't saved and doesn't change current scores.")}</p>
           </ExpandSection>
         </>
       )}
@@ -1058,22 +1132,23 @@ export function RateForm() {
               aria-label={tr("ملاحظات المشروع", "Project feedback")}
             />
           )}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <Btn disabled={phase === "loading"} onClick={() => void analyze()}>
+          <div className="mt-3 flex flex-nowrap items-stretch gap-2">
+            <Btn className="min-w-0 flex-1 px-3 py-2.5 text-sm" disabled={phase === "loading"} onClick={() => void analyze()}>
               {phase === "loading"
                 ? tr("جارٍ التفسير…", "Interpreting…")
                 : reviewReady
-                  ? tr("إعادة الاقتراح من النص", "Suggest again from text")
-                  : tr("اقترح تقييمات من النص", "Suggest ratings from the text")}
+                  ? tr("إعادة الاقتراح", "Suggest again")
+                  : tr("اقترح من النص", "Suggest from text")}
             </Btn>
             {!text.trim() && !reviewReady && (
-              <Btn kind="outline" disabled={phase === "loading"} onClick={() => setText(sample)}>
-                {tr("استخدم نصاً تجريبياً", "Use sample text")}
+              <Btn kind="outline" className="min-w-0 flex-1 px-3 py-2.5 text-sm" disabled={phase === "loading"} onClick={() => setText(sample)}>
+                {tr("نص تجريبي", "Sample text")}
               </Btn>
             )}
             {reviewReady && (
               <Btn
                 kind="outline"
+                className="min-w-0 flex-1 px-3 py-2.5 text-sm"
                 disabled={phase === "loading"}
                 onClick={() => {
                   setFound([])
@@ -1116,8 +1191,8 @@ export function RateForm() {
                 {fullyConfirmed
                   ? tr("تم تأكيد الكل — الملف محدَّث.", "All confirmed — profile updated.")
                   : tr(
-                    `${pending.length} بانتظار التأكيد من ${found.length}`,
-                    `${pending.length} awaiting confirmation of ${found.length}`,
+                    `${pending.length} من ${found.length} بانتظار التأكيد`,
+                    `${pending.length} of ${found.length} awaiting confirmation`,
                   )}
               </p>
             </div>
@@ -1274,7 +1349,7 @@ export function MyBehavior() {
       <PageTitle sub={tr("ملفك السلوكي كما تراه أنت، مع خطتك للنمو", "Your behavioral profile as you see it, with your growth plan")}>{tr("عرضي", "My view")}</PageTitle>
       <DataNotice error={data.error} />
       <div className="mb-6 grid gap-4 md:grid-cols-2">
-        <Card className="flex flex-col gap-3 p-6"><div className="text-sm text-i500">{tr("تغطية الأدلة لدور مدير فريق", "Evidence coverage for team manager")}</div><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} size={56} /><p className="m-0 text-base leading-[1.7] text-i700">{tr("هذه إشارة جاهزية وليست توقعاً. القرار النهائي لمديرك.", "This is a readiness signal, not a prediction. The final decision is your manager's.")}</p></Card>
+        <Card className="flex flex-col gap-3 p-6"><div className="text-sm text-i500">{tr("نسبة المطابقة لدور مدير فريق", "Match % for team manager")}</div><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} size={56} /><p className="m-0 text-base leading-[1.7] text-i700">{tr("هذه إشارة جاهزية وليست توقّعاً. القرار النهائي لمديرك.", "This is a readiness signal, not a prediction. The final decision is your manager's.")}</p></Card>
         <Card className="flex flex-col gap-3 bg-ink p-6 text-white">
           <div className="text-sm text-mint">{tr("أولويتك الآن", "Your priority now")}</div>
           <div className="text-xl font-bold">{bi(data.behaviors.delegation.name)}</div>

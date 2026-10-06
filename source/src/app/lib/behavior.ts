@@ -237,8 +237,8 @@ export function readiness(
 
 export const PATH_NAME: Record<PathKey, B> = {
   now: b("جاهز الآن", "Ready now"),
-  develop: b("طوّر أولاً ثم أعد التقييم", "Develop first, then re-evaluate"),
-  specialist: b("مسار أخصائي أول", "Explore alternative path"),
+  develop: b("تطوير أولاً", "Develop first"),
+  specialist: b("مسار بديل", "Alternative path"),
   insufficient: b("أدلة غير كافية", "Insufficient evidence"),
 }
 
@@ -259,7 +259,7 @@ export function explainReadiness(e: Employee): Explain {
   return {
     title: b(`كيف حُسبت جاهزية ${e.name.ar}؟`, `How ${e.name.en}'s readiness was calculated`),
     formula: b(
-      "ملاءمة الدور = مجموع [ أقل قيمة من (الدرجة ÷ المطلوب، 1) × الوزن ] ÷ مجموع أوزان السلوكيات المقيّمة × 100. الدرجة من مصادر مؤكدة فقط (المدير 0.45 · الزميل 0.35 · المستند 0.20). تقييم الذات لا يدخل في الدرجة.",
+      "مطابقة الدور = مجموع [ أقل قيمة من (الدرجة ÷ المطلوب، 1) × الوزن ] ÷ مجموع أوزان السلوكيات المقيّمة × 100. الدرجة من مصادر مؤكدة فقط (المدير 0.45 · الزميل 0.35 · المستند 0.20). تقييم الذات لا يدخل في الدرجة.",
       "Role match = Σ [ min(score ÷ required, 1) × weight ] ÷ Σ assessed weights × 100. Score from confirmed sources only (manager 0.45 · peer 0.35 · document 0.20). Self is excluded.",
     ),
     inputs: m.parts.map((p) => ({

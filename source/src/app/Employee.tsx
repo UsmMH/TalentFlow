@@ -27,7 +27,11 @@ export function MyReadiness() {
         <Card className="flex flex-col gap-3 bg-ink p-6 text-white">
           <div className="text-sm text-mint">{tr("أولويتك الآن", "Your priority now")}</div>
           <div className="text-xl font-bold">{bi(SKILLS[gap.skill])}</div>
-          <div className="font-num text-[40px] font-extrabold leading-none">{gap.cur} → {gap.required}</div>
+          <div className="flex flex-wrap items-center gap-2 text-xl font-bold leading-none">
+            <LevelLabel level={gap.cur} />
+            <span aria-hidden>→</span>
+            <LevelLabel level={gap.required} />
+          </div>
           <Link to="/app/me/plan" className="mt-2 inline-flex items-center justify-center rounded-[12px] border border-white/40 bg-transparent px-4 py-2 text-sm font-bold text-white no-underline hover:border-mint hover:text-mint">
             {tr("عرض خطة التطوير", "View development plan")}
           </Link>
@@ -66,7 +70,7 @@ export function MyPlan() {
   const done = 0
   return (
     <>
-      <PageTitle sub={approved ? tr("اعتمد المدير خطتك", "Your manager approved this plan") : tr("الأولوية: باور بي آي 50 → 75", "Priority: Power BI 50 → 75")}>{tr("خطة التطوير", "Development plan")}</PageTitle>
+      <PageTitle sub={approved ? tr("اعتمد المدير خطتك", "Your manager approved this plan") : tr("الأولوية: باور بي آي · نامٍ ← متمكن", "Priority: Power BI · Developing → Proficient")}>{tr("خطة التطوير", "Development plan")}</PageTitle>
       <Card className="mb-6 p-6">
         <div className="mb-2 flex justify-between text-sm text-i500"><span>{tr("تقدّم الخطة", "Plan progress")}</span><b className="font-num text-i900">{done}/{PLAN.length}</b></div>
         <div className="h-3 rounded-full bg-i100"><div className="bar-fill h-3 rounded-full bg-flow" style={{ width: `${(done / PLAN.length) * 100 + 8}%` }} /></div>

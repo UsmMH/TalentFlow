@@ -18,6 +18,46 @@ import { supabase, supabaseConfigured } from "./supabase"
 type BehaviorMeta = { id: BId; name: { ar: string; en: string }; anchor: { ar: string; en: string }; rubric: Rubric }
 type RoleReq = typeof ROLE_REQ
 
+/** Map a DB quote (often EN-only) onto local bilingual seed when possible. */
+const QUOTE_BANK: { ar: string; en: string }[] = [
+  ...EMPLOYEES.flatMap((e) => Object.values(e.evidence ?? {}).flatMap((list) => (list ?? []).map((q) => q.text))),
+  // Extra seed phrases that appear in Supabase but not in the compact local evidence set.
+  b("«شرح مرة كيف يقدّم النتائج ثم صمت»", "Explained how to present results once, then went quiet"),
+  b("«أرشد المبتدئين أسبوعياً»", "I coach juniors weekly"),
+  b("«أصلح الأرقام الخاطئة في اليوم نفسه»", "Fixed the wrong numbers the same day they were raised"),
+  b("ملاحظة بأثر رجعي: تحمّل خطأ الأرقام في اجتماع القيادة", "Retrospective note: owned the number error in the leadership meeting"),
+  b("«أتحمّل نتائج تسليماتي»", "I own my deliveries"),
+  b("«طبّق معيار المراجعة نفسه على كل زميل»", "Applied the same review standard to every teammate"),
+  b("«نُسب فضل لوحة المعلومات بعدالة»", "Credit for the dashboard was shared fairly"),
+  b("«أعامل الجميع بالمثل»", "I treat people the same"),
+  b("«يؤجّل الحديث عن الخلاف حتى يهدأ الجميع»", "Postpones talking about disagreement until everyone calms down"),
+  b("«أنتظر حتى يهدأ الناس»", "I wait until people cool down"),
+  b("«يشرح سياق التحليل بوضوح في الوقوف اليومي»", "Explains analysis context clearly in standups"),
+  b("«ينصت في مراجعات التصميم التقنية»", "Listens in technical design reviews"),
+  b("«أشرح سبب الطلب»", "I explain the why behind requests"),
+]
+
+function quoteB(raw: string): { ar: string; en: string } {
+  const t = raw.trim()
+  if (!t) return b("", "")
+  const norm = (s: string) => s.trim().replace(/^["«]|["»]$/g, "").trim().toLowerCase()
+  const hit = QUOTE_BANK.find((q) => norm(q.en) === norm(t) || norm(q.ar) === norm(t))
+  return hit ?? b(t, t)
+}
+
+/** Drop near-duplicate quotes after bilingual remapping (same AR/EN pair twice). */
+function dedupeQuotes(list: EvidenceQuote[]): EvidenceQuote[] {
+  const seen = new Set<string>()
+  const out: EvidenceQuote[] = []
+  for (const q of list) {
+    const key = `${q.source}|${q.text.ar}|${q.text.en}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(q)
+  }
+  return out
+}
+
 type Store = {
   loading: boolean
   source: "supabase" | "local"
@@ -128,7 +168,7 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp" | "rel
     cur.dates.push(row.created_at)
     if (row.example || row.ai_quote) {
       cur.examples.push({
-        text: b(row.example ?? row.ai_quote ?? "", row.example ?? row.ai_quote ?? ""),
+        text: quoteB(row.example ?? row.ai_quote ?? ""),
         source: rater,
         confirmed: row.source === "human" || row.status === "confirmed",
       })
@@ -147,7 +187,7 @@ async function fetchFromSupabase(): Promise<Omit<Store, "loading" | "emp" | "rel
         if (!hit) continue
         rating[rater] = Math.round((hit.sum / hit.n) * 100) / 100
         dates.push(...hit.dates)
-        evidence[bid] = [...(evidence[bid] ?? []), ...hit.examples]
+        evidence[bid] = dedupeQuotes([...(evidence[bid] ?? []), ...hit.examples])
       }
       ratingsMap[bid] = rating
     }

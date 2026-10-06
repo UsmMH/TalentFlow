@@ -24,48 +24,43 @@ export const LogoIcon = ({ h = 32 }: { h?: number }) => (
   </svg>
 )
 
-export function DeviceToggle({ on, onChange }: { on: "desktop" | "mobile"; onChange: (d: "desktop" | "mobile") => void }) {
-  const { tr } = useApp()
-  const seg = (v: boolean) => `rounded-[8px] border-0 px-3 py-2 text-sm font-bold ${v ? "bg-ink text-white" : "bg-transparent text-i700"}`
-  return (
-    <div className="flex gap-1 rounded-[12px] border border-i100 bg-mist p-1" role="group" aria-label={tr("نوع الجهاز", "Device")}>
-      <button className={seg(on === "desktop")} onClick={() => onChange("desktop")}>{tr("سطح المكتب", "Desktop")}</button>
-      <button className={seg(on === "mobile")} onClick={() => onChange("mobile")}>{tr("الجوال", "Mobile")}</button>
-    </div>
-  )
-}
-
 const R = "/app/roles/senior-data-analyst"
 
 type NavDef = { to: string; label: string; end: boolean; icon: LucideIcon; active?: (path: string) => boolean }
 
-function SideNavLink({ to, label, end, icon: Icon, active }: NavDef) {
+function SideNavLink({ to, label, end, icon: Icon, active, compact }: NavDef & { compact?: boolean }) {
   const { pathname } = useLocation()
   return (
     <NavLink
       to={to}
       end={end}
+      title={label}
+      aria-label={label}
       className={({ isActive }) => {
         const on = active ? active(pathname) : isActive
-        return `flex min-w-[96px] shrink-0 items-center gap-2.5 rounded-[12px] border-t-[3px] px-3 py-2.5 text-sm font-bold leading-snug no-underline lg:min-w-0 lg:flex-none lg:border-s-[3px] lg:border-t-0 lg:px-3 lg:py-2.5 lg:text-[15px] ${
+        if (compact) {
+          return `flex min-w-0 flex-1 items-center justify-center rounded-[12px] py-2.5 no-underline ${
+            on ? "bg-white/15 text-white" : "text-white/70"
+          }`
+        }
+        return `flex items-center gap-2.5 rounded-[12px] border-s-[3px] px-3 py-2.5 text-[15px] font-bold leading-snug no-underline ${
           on ? "border-mint bg-white/10 text-white" : "border-transparent text-white/80 hover:bg-white/5 hover:text-white"
         }`
       }}
     >
-      <Icon size={18} className="shrink-0 opacity-90" aria-hidden />
-      <span className="text-start">{label}</span>
+      <Icon size={compact ? 22 : 18} className="shrink-0 opacity-90" aria-hidden />
+      {!compact && <span className="text-start">{label}</span>}
     </NavLink>
   )
 }
 
 /** Hub = `/app/behavior` (KPIs). Files list = `/app/behavior/files` → `/app/behavior/:id`. */
 export default function Shell() {
-  const { lang, setLang, tr, setDevice } = useApp()
-  const embed = new URLSearchParams(window.location.search).has("embed")
+  const { lang, setLang, tr } = useApp()
   const nav = useNavigate()
   const { pathname } = useLocation()
   const employee = pathname.startsWith("/app/me")
-  const onSkills = pathname === "/app" || pathname.startsWith("/app/roles")
+  const onSkills = pathname === "/app/skills" || pathname.startsWith("/app/roles")
   const [skillsOpen, setSkillsOpen] = useState(onSkills)
   const [resetOpen, setResetOpen] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
@@ -83,14 +78,14 @@ export default function Shell() {
         { to: "/app/me/plan", label: tr("خطتي", "My plan"), end: true, icon: Sparkles },
       ]
     : [
-        { to: "/app/behavior", label: tr("نظرة الفريق", "Team"), end: true, icon: LayoutGrid },
+        { to: "/app/behavior", label: tr("لمحة عن الفريق", "Team at a glance"), end: true, icon: LayoutGrid },
         { to: "/app/behavior/files", label: tr("ملفات الموظفين", "Employee files"), end: true, icon: User, active: filesActive },
         { to: "/app/behavior/rate", label: tr("جمع الملاحظات", "Collect feedback"), end: true, icon: MessageSquarePlus },
         { to: "/app/behavior/ahmad/analysis", label: tr("التحليل والخطة", "Analysis & plan"), end: true, icon: Sparkles, active: analysisActive },
       ]
 
   const skillsItems: NavDef[] = [
-    { to: "/app", label: tr("نظرة المهارات", "Skills overview"), end: true, icon: Briefcase },
+    { to: "/app/skills", label: tr("ملخص المهارات", "Skills summary"), end: true, icon: Briefcase },
     { to: R, label: tr("ترتيب المرشحين", "Candidate ranking"), end: true, icon: ListOrdered },
     { to: `${R}/chain`, label: tr("سلسلة الشواغر", "Vacancy chain"), end: true, icon: GitBranch },
     { to: `${R}/decision`, label: tr("مقارنة الخيارات", "Compare options"), end: true, icon: Scale },
@@ -123,28 +118,27 @@ export default function Shell() {
     window.location.reload()
   }
 
-  const seg = (on: boolean) => `rounded-[8px] border-0 px-4 py-2 text-sm font-bold ${on ? "bg-ink text-white" : "bg-transparent text-i700"}`
+  const seg = (on: boolean) => `rounded-[8px] border-0 px-3 py-1.5 text-sm font-bold lg:px-4 lg:py-2 ${on ? "bg-ink text-white" : "bg-transparent text-i700"}`
   return (
     <ExplainProvider>
       <div className="flex min-h-screen flex-col lg:flex-row">
-        <aside className="flex shrink-0 flex-col gap-5 bg-ink p-4 lg:sticky lg:top-0 lg:h-screen lg:w-[260px] lg:p-5">
-          <a href="landing.html" className="flex items-center gap-2 rounded-[12px] bg-white px-4 py-3 no-underline" aria-label="تالنت فلو">
+        {/* Desktop sidebar — unchanged */}
+        <aside className="hidden shrink-0 flex-col gap-5 bg-ink p-5 lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-[260px]">
+          <a href="landing.html" className="flex items-center gap-2 rounded-[12px] bg-white px-4 py-3 no-underline" dir="ltr" aria-label="TalentFlow">
             <LogoIcon />
-            <span className={`text-xl text-ink ${lang === "ar" ? "font-bold" : "font-num font-extrabold"}`}>{lang === "ar" ? "تالنت فلو" : "TalentFlow"}</span>
+            <span className="font-num text-xl font-extrabold text-ink">TalentFlow</span>
           </a>
-          <nav className="nav-in fixed inset-x-0 bottom-0 z-40 flex flex-row gap-1 overflow-x-auto bg-ink p-2 lg:static lg:flex-col lg:gap-1 lg:overflow-visible lg:bg-transparent lg:p-0">
-            <div className="flex flex-row gap-1 lg:flex-col lg:gap-1">
-              {!employee && (
-                <p className="m-0 hidden px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-white/40 lg:block">
-                  {tr("المسار السلوكي", "Behavioral path")}
-                </p>
-              )}
-              {primary.map((item) => (
-                <SideNavLink key={item.to} {...item} />
-              ))}
-            </div>
+          <nav className="flex flex-col gap-1">
             {!employee && (
-              <div className="hidden lg:block">
+              <p className="m-0 px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-white/40">
+                {tr("المسار السلوكي", "Behavioral path")}
+              </p>
+            )}
+            {primary.map((item) => (
+              <SideNavLink key={item.to} {...item} />
+            ))}
+            {!employee && (
+              <div>
                 <button
                   type="button"
                   onClick={() => setSkillsOpen((v) => !v)}
@@ -165,7 +159,7 @@ export default function Shell() {
               </div>
             )}
           </nav>
-          <div className="mt-auto hidden flex-col gap-2 lg:flex">
+          <div className="mt-auto flex flex-col gap-2">
             <p className="m-0 text-xs text-white/55">{tr("بيانات تجريبية · شركة نماء للتقنية", "Demo data · Nama Technology Co.")}</p>
             <button
               type="button"
@@ -178,30 +172,48 @@ export default function Shell() {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-i100 bg-white px-6 py-3">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-i500">{tr("عرض كـ:", "View as:")}</span>
-              <div className="flex gap-1 rounded-[12px] border border-i100 bg-mist p-1" role="group">
-                <button className={seg(!employee)} onClick={() => nav("/app/behavior")}>{tr("المدير", "Manager")}</button>
-                <button className={seg(employee)} onClick={() => nav("/app/me/behavior")}>{tr("الموظف (أحمد)", "Employee (Ahmad)")}</button>
+        {/* Mobile floating tab bar — inset so the phone frame doesn’t clip it */}
+        <nav
+          className="nav-in fixed inset-x-3 bottom-3 z-40 flex gap-1 rounded-[16px] bg-ink px-1.5 py-1 shadow-[0_8px_24px_rgba(7,59,46,0.35)] lg:hidden"
+          style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom))" }}
+          aria-label={tr("التنقل", "Navigation")}
+        >
+          {primary.map((item) => (
+            <SideNavLink key={item.to} {...item} compact />
+          ))}
+        </nav>
+
+        <div className="flex min-w-0 flex-1 flex-col bg-mist">
+          <header className="flex flex-col gap-2 border-b border-i100 bg-white px-3 py-2 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-4 lg:px-6 lg:py-3">
+            <div className="flex items-center justify-between gap-2">
+              <a href="landing.html" className="flex items-center gap-1.5 no-underline lg:hidden" dir="ltr" aria-label="TalentFlow">
+                <LogoIcon h={28} />
+                <span className="font-num text-base font-extrabold text-ink">TalentFlow</span>
+              </a>
+              <div className="flex items-center gap-1.5 lg:ms-auto">
+                <button
+                  type="button"
+                  className="rounded-[8px] border border-i100 bg-white px-2.5 py-1.5 text-xs font-bold text-i700 lg:hidden"
+                  onClick={() => { setResetMsg(null); setResetOpen(true) }}
+                >
+                  {tr("إعادة التعيين", "Reset")}
+                </button>
+                <button onClick={() => setLang(lang === "ar" ? "en" : "ar")} className="rounded-[8px] border border-ink bg-white px-2.5 py-1.5 text-xs font-bold text-ink lg:px-4 lg:py-2 lg:text-sm">
+                  {lang === "ar" ? "الإنجليزية" : "عربي"}
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-[8px] border border-i100 bg-white px-3 py-2 text-sm font-bold text-i700 lg:hidden"
-                onClick={() => { setResetMsg(null); setResetOpen(true) }}
-              >
-                {tr("إعادة التعيين", "Reset")}
-              </button>
-              {!embed && <DeviceToggle on="desktop" onChange={setDevice} />}
-              <button onClick={() => setLang(lang === "ar" ? "en" : "ar")} className="rounded-[8px] border border-ink bg-white px-4 py-2 text-sm font-bold text-ink">
-                {lang === "ar" ? "الإنجليزية" : "عربي"}
-              </button>
+              <span className="hidden text-sm text-i500 lg:inline">{tr("عرض باسم:", "View as:")}</span>
+              <div className="flex w-full gap-1 rounded-[12px] border border-i100 bg-mist p-1 lg:w-auto" role="group">
+                <button className={`flex-1 lg:flex-none ${seg(!employee)}`} onClick={() => nav("/app/behavior")}>{tr("المدير", "Manager")}</button>
+                <button className={`flex-1 lg:flex-none ${seg(employee)}`} onClick={() => nav("/app/me/behavior")}>{tr("الموظف (أحمد)", "Employee (Ahmad)")}</button>
+              </div>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-[1200px] flex-1 p-4 pb-24 lg:p-8"><div key={pathname} className="page"><Outlet /></div></main>
+          <main className="mx-auto w-full max-w-[1200px] flex-1 p-3 pb-[5.75rem] lg:p-8 lg:pb-8">
+            <div key={pathname} className="page"><Outlet /></div>
+          </main>
         </div>
       </div>
 

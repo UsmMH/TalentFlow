@@ -28,9 +28,9 @@ export const PageTitle = ({ children, sub }: { children: ReactNode; sub?: ReactN
 
 /* ---------- StatusBadge ---------- */
 const V = {
-  met: ["#0B6B4F", "#DDF5E9", CheckCircle, ["متحقق", "Met"]],
+  met: ["#0B6B4F", "#DDF5E9", CheckCircle, ["مستوفى", "Met"]],
   partial: ["#8A5A00", "#FBEFD5", Clock, ["جزئي", "Partial"]],
-  critical: ["#A32E2E", "#FBE3E3", AlertTriangle, ["شرط حرج ناقص", "Critical missing"]], // red ONLY here
+  critical: ["#A32E2E", "#FBE3E3", AlertTriangle, ["فجوة حرجة", "Critical gap"]], // red ONLY here
   lowConf: ["#4F6B75", "transparent", BarChart3, ["ثقة منخفضة", "Low confidence"]],
   highConf: ["#0B6B4F", "#DDF5E9", ShieldCheck, ["ثقة عالية", "High confidence"]],
   notAssessed: ["#56645F", "#EEF1F0", Search, ["غير مقيّم", "Not assessed"]],
@@ -211,28 +211,38 @@ export function BackLink({ to, label }: { to: string; label: string }) {
   )
 }
 
-export function ScoreCell({ value, explain, size = 32, compactExplain }: { value: string; explain: Explain; size?: number; compactExplain?: boolean }) {
+export function ScoreCell({ value, explain, size = 32, compactExplain }: { value: string; explain?: Explain; size?: number; compactExplain?: boolean }) {
   return (
     <div className="flex flex-col items-start gap-0.5">
       <span className="font-num font-extrabold leading-none text-ink" style={{ fontSize: size }}><Num text={value} /></span>
-      <HowLink explain={explain} compact={compactExplain ?? size <= 56} />
+      {explain && <HowLink explain={explain} compact={compactExplain ?? size <= 56} />}
     </div>
   )
 }
 
-/* ---------- Flow line (brand motif): Mint dot only on the first node ---------- */
-export function FlowChain({ nodes, bi }: { nodes: { title: string; sub: string }[]; bi?: never }) {
+/* ---------- Vacancy chain: vertical steps (no wrap / reorder bugs in narrow columns) ---------- */
+export function FlowChain({ nodes }: { nodes: { title: string; sub: string }[]; bi?: never }) {
   return (
     <div className="rounded-[20px] bg-ink p-6">
-      <ol className="m-0 flex list-none flex-wrap items-start gap-4 p-0">
+      <ol className="m-0 flex list-none flex-col gap-0 p-0">
         {nodes.map((n, i) => (
-          <li key={i} className="flex min-w-[160px] flex-1 flex-col gap-2" style={{ ["--d" as string]: `${i * 0.35}s` }}>
-            <div className="flex items-center">
-              <span className={`flow-dot size-4 shrink-0 rounded-full ${i === 0 ? "bg-mint" : "bg-white"}`} style={{ animationDelay: `${i * 0.35}s` }} />
-              {i < nodes.length - 1 && <span className="flow-line h-[3px] flex-1 bg-white/70" style={{ animationDelay: `${i * 0.35 + 0.2}s` }} />}
+          <li key={i} className="flex gap-3" style={{ ["--d" as string]: `${i * 0.35}s` }}>
+            <div className="flex w-4 shrink-0 flex-col items-center">
+              <span
+                className={`flow-dot size-4 shrink-0 rounded-full ${i === 0 ? "bg-mint" : "bg-white"}`}
+                style={{ animationDelay: `${i * 0.35}s` }}
+              />
+              {i < nodes.length - 1 && (
+                <span
+                  className="flow-line-v mt-1 w-[3px] flex-1 min-h-[28px] bg-white/70"
+                  style={{ animationDelay: `${i * 0.35 + 0.2}s` }}
+                />
+              )}
             </div>
-            <div className="flow-text text-base font-bold text-white" style={{ animationDelay: `${i * 0.35 + 0.1}s` }}>{n.title}</div>
-            <div className="flow-text text-sm leading-[1.6] text-white/85" style={{ animationDelay: `${i * 0.35 + 0.2}s` }}>{n.sub}</div>
+            <div className={`min-w-0 flex-1 ${i < nodes.length - 1 ? "pb-5" : ""}`}>
+              <div className="flow-text text-base font-bold text-white" style={{ animationDelay: `${i * 0.35 + 0.1}s` }}>{n.title}</div>
+              <div className="flow-text mt-1 text-sm leading-[1.6] text-white/85" style={{ animationDelay: `${i * 0.35 + 0.2}s` }}>{n.sub}</div>
+            </div>
           </li>
         ))}
       </ol>
