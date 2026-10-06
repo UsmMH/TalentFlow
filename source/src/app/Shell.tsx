@@ -153,7 +153,6 @@ export default function Shell() {
                     {skillsItems.map((item) => (
                       <SideNavLink key={item.to} {...item} />
                     ))}
-                    <p className="m-0 px-1 pt-1 text-[11px] text-white/40">{tr("بيانات عينة · ليست مسار العرض", "Sample data · not the demo path")}</p>
                   </div>
                 )}
               </div>
