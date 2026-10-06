@@ -45,6 +45,7 @@ async function once<T>(
   jsonSchema: JsonSchema,
   model: string,
   timeoutMs: number,
+  format: "json_schema" | "json_object",
 ): Promise<{ data: T; latency_ms: number; model: string }> {
   const key = process.env.OPENROUTER_API_KEY
   if (!key) throw new Error("Missing OPENROUTER_API_KEY")
@@ -52,6 +53,18 @@ async function once<T>(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const started = Date.now()
+
+  const response_format =
+    format === "json_object"
+      ? { type: "json_object" as const }
+      : {
+          type: "json_schema" as const,
+          json_schema: {
+            name: jsonSchema.name,
+            strict: jsonSchema.strict ?? true,
+            schema: jsonSchema.schema,
+          },
+        }
 
   try {
     const res = await fetch(OPENROUTER_URL, {
@@ -67,15 +80,9 @@ async function once<T>(
         model,
         messages,
         temperature: 0.2,
-        provider: { require_parameters: true },
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: jsonSchema.name,
-            strict: jsonSchema.strict ?? true,
-            schema: jsonSchema.schema,
-          },
-        },
+        // json_object: don't require provider-side schema (flash-lite returns empty {} under json_schema+strict)
+        ...(format === "json_schema" ? { provider: { require_parameters: true } } : {}),
+        response_format,
       }),
     })
 
@@ -105,7 +112,7 @@ async function once<T>(
     }
 
     const answered = json.model ?? model
-    console.info("[llm] ok", { model: answered, latency_ms })
+    console.info("[llm] ok", { model: answered, latency_ms, format })
     return { data: parsed, latency_ms, model: answered }
   } catch (err) {
     const latency_ms = Date.now() - started
@@ -132,12 +139,18 @@ export async function chatJson<T>(opts: {
   timeoutMs?: number
   /** Override total wall-clock budget (default 25s). */
   totalCapMs?: number
+  /**
+   * json_schema (default) = provider-enforced schema.
+   * json_object = free JSON object (better for flash-lite interpret; we validate server-side).
+   */
+  format?: "json_schema" | "json_object"
   /** If provided, invalid results advance to the next model. */
   validate?: (data: T) => { ok: true } | { ok: false; error: string }
 }): Promise<LlmResult<T>> {
   loadLocalEnv()
   const perAttempt = opts.timeoutMs ?? FIRST_ATTEMPT_TIMEOUT_MS
   const totalCap = opts.totalCapMs ?? TOTAL_CAP_MS
+  const format = opts.format ?? "json_schema"
   const models = modelsToTry()
   let lastError = "LLM failed"
   let lastModel = models[0] ?? "unknown"
@@ -159,6 +172,7 @@ export async function chatJson<T>(opts: {
         opts.jsonSchema,
         model,
         budget,
+        format,
       )
       if (opts.validate) {
         const v = opts.validate(data)

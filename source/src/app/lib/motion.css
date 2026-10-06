@@ -10,6 +10,12 @@
 @keyframes flash { 0%, 100% { background-color: #eef5f1; } 40% { background-color: #ddf5e9; } }
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 
+/* Accordion expand/collapse (Analysis sections) */
+.expand-panel { transition: grid-template-rows 0.3s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.25s ease; }
+
+/* Employee picker options stagger in when the list opens */
+.emp-opt { animation: rise 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .reveal.in { opacity: 1; transform: none; }
 

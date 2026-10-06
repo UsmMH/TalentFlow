@@ -61,7 +61,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const roleName = displayName(role, language, "role")
     const sb = getSupabaseAdmin()
 
-    // Cache hit: same snapshot hash + language → skip LLM
+    // force=false → return stored only (no LLM). Exact hash → latest non-seed → none.
+    // Seed rows are reserved for LLM failure fallback so the page stays empty until Generate.
     if (!body.force) {
       const { data: cached } = await sb
         .from("development_analyses")
@@ -70,18 +71,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq("role_id", role.id)
         .eq("language", language)
         .eq("snapshot_hash", hash)
+        .neq("model", "seed")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
 
-      if (cached?.narrative) {
+      const { data: latest } = cached?.narrative
+        ? { data: cached }
+        : await sb
+            .from("development_analyses")
+            .select("id,narrative,model,snapshot_hash,created_at")
+            .eq("employee_id", employee.id)
+            .eq("role_id", role.id)
+            .eq("language", language)
+            .neq("model", "seed")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+      if (latest?.narrative) {
+        const model = latest.model ?? "cache"
         return res.status(200).json({
           ok: true,
           data: {
-            analysis: cached.narrative as Analysis,
+            analysis: latest.narrative as Analysis,
             source: "cache",
-            saved: false,
-            model: cached.model ?? "cache",
+            saved: true,
+            model,
             latency_ms: Date.now() - wallStart,
             snapshot_hash: hash,
             signal: payload.signal,
@@ -89,6 +105,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         })
       }
+
+      return res.status(200).json({
+        ok: true,
+        data: {
+          analysis: null,
+          source: "none",
+          saved: false,
+          model: "",
+          latency_ms: Date.now() - wallStart,
+          snapshot_hash: hash,
+          signal: payload.signal,
+          role_match: payload.exact,
+        },
+      })
     }
 
     const messages = [
@@ -192,7 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn("[analysis] store_failed", { error: insErr.message })
         // Retry without snapshot_hash if column missing on older DB
         if (insErr.message.includes("snapshot_hash")) {
-          await sb.from("development_analyses").insert({
+          const { error: retryErr } = await sb.from("development_analyses").insert({
             employee_id: employee.id,
             role_id: role.id,
             engine_snapshot: { ...payload, snapshot_hash: hash },
@@ -200,7 +230,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             language,
             model,
           })
+          saved = !retryErr
         }
+      } else {
+        saved = true
       }
     }
 

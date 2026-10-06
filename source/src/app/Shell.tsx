@@ -37,18 +37,20 @@ export function DeviceToggle({ on, onChange }: { on: "desktop" | "mobile"; onCha
 
 const R = "/app/roles/senior-data-analyst"
 
-type NavDef = { to: string; label: string; end: boolean; icon: LucideIcon }
+type NavDef = { to: string; label: string; end: boolean; icon: LucideIcon; active?: (path: string) => boolean }
 
-function SideNavLink({ to, label, end, icon: Icon }: NavDef) {
+function SideNavLink({ to, label, end, icon: Icon, active }: NavDef) {
+  const { pathname } = useLocation()
   return (
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) =>
-        `flex min-w-[96px] shrink-0 items-center gap-2.5 rounded-[12px] border-t-[3px] px-3 py-2.5 text-sm font-bold leading-snug no-underline lg:min-w-0 lg:flex-none lg:border-s-[3px] lg:border-t-0 lg:px-3 lg:py-2.5 lg:text-[15px] ${
-          isActive ? "border-mint bg-white/10 text-white" : "border-transparent text-white/80 hover:bg-white/5 hover:text-white"
+      className={({ isActive }) => {
+        const on = active ? active(pathname) : isActive
+        return `flex min-w-[96px] shrink-0 items-center gap-2.5 rounded-[12px] border-t-[3px] px-3 py-2.5 text-sm font-bold leading-snug no-underline lg:min-w-0 lg:flex-none lg:border-s-[3px] lg:border-t-0 lg:px-3 lg:py-2.5 lg:text-[15px] ${
+          on ? "border-mint bg-white/10 text-white" : "border-transparent text-white/80 hover:bg-white/5 hover:text-white"
         }`
-      }
+      }}
     >
       <Icon size={18} className="shrink-0 opacity-90" aria-hidden />
       <span className="text-start">{label}</span>
@@ -56,28 +58,35 @@ function SideNavLink({ to, label, end, icon: Icon }: NavDef) {
   )
 }
 
-/** Hub = `/app/behavior` (team readiness list). */
+/** Hub = `/app/behavior` (KPIs). Files list = `/app/behavior/files` → `/app/behavior/:id`. */
 export default function Shell() {
   const { lang, setLang, tr, setDevice } = useApp()
   const embed = new URLSearchParams(window.location.search).has("embed")
   const nav = useNavigate()
   const { pathname } = useLocation()
   const employee = pathname.startsWith("/app/me")
-  const [skillsOpen, setSkillsOpen] = useState(() => pathname.startsWith("/app/roles") || pathname === "/app")
+  const onSkills = pathname === "/app" || pathname.startsWith("/app/roles")
+  const [skillsOpen, setSkillsOpen] = useState(onSkills)
   const [resetOpen, setResetOpen] = useState(false)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetMsg, setResetMsg] = useState<string | null>(null)
 
+  // Files nav stays lit on list + any single-employee profile (not rate/analysis).
+  const filesActive = (p: string) =>
+    p === "/app/behavior/files" || (/^\/app\/behavior\/[^/]+$/.test(p) && p !== "/app/behavior/rate")
+  const analysisActive = (p: string) => /^\/app\/behavior\/[^/]+\/analysis$/.test(p)
+
+  // Primary = demo path only. Skills stay collapsed unless already on a skills route.
   const primary: NavDef[] = employee
     ? [
         { to: "/app/me/behavior", label: tr("عرضي", "My view"), end: false, icon: User },
         { to: "/app/me/plan", label: tr("خطتي", "My plan"), end: true, icon: Sparkles },
       ]
     : [
-        { to: "/app/behavior", label: tr("نظرة عامة على الفريق", "Team overview"), end: true, icon: LayoutGrid },
-        { to: "/app/behavior/ahmad", label: tr("ملف الموظف", "Employee profile"), end: true, icon: User },
+        { to: "/app/behavior", label: tr("نظرة الفريق", "Team"), end: true, icon: LayoutGrid },
+        { to: "/app/behavior/files", label: tr("ملفات الموظفين", "Employee files"), end: true, icon: User, active: filesActive },
         { to: "/app/behavior/rate", label: tr("جمع الملاحظات", "Collect feedback"), end: true, icon: MessageSquarePlus },
-        { to: "/app/behavior/ahmad/analysis", label: tr("التحليل والخطة", "Analysis & plan"), end: true, icon: Sparkles },
+        { to: "/app/behavior/ahmad/analysis", label: tr("التحليل والخطة", "Analysis & plan"), end: true, icon: Sparkles, active: analysisActive },
       ]
 
   const skillsItems: NavDef[] = [
@@ -106,6 +115,11 @@ export default function Shell() {
     }
     setResetOpen(false)
     setResetMsg(tr("أُعيدت بيانات العرض التجريبية.", "Demo data was reset."))
+    try {
+      sessionStorage.removeItem("tf-demo-path-approved")
+    } catch {
+      /* ignore */
+    }
     window.location.reload()
   }
 
@@ -120,6 +134,11 @@ export default function Shell() {
           </a>
           <nav className="nav-in fixed inset-x-0 bottom-0 z-40 flex flex-row gap-1 overflow-x-auto bg-ink p-2 lg:static lg:flex-col lg:gap-1 lg:overflow-visible lg:bg-transparent lg:p-0">
             <div className="flex flex-row gap-1 lg:flex-col lg:gap-1">
+              {!employee && (
+                <p className="m-0 hidden px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-white/40 lg:block">
+                  {tr("المسار السلوكي", "Behavioral path")}
+                </p>
+              )}
               {primary.map((item) => (
                 <SideNavLink key={item.to} {...item} />
               ))}
@@ -129,19 +148,20 @@ export default function Shell() {
                 <button
                   type="button"
                   onClick={() => setSkillsOpen((v) => !v)}
-                  className="mt-2 flex w-full items-center justify-between gap-2 rounded-[12px] border border-white/15 bg-white/5 px-3 py-2.5 text-start text-[13px] font-bold leading-snug text-white/75 hover:text-white"
+                  className="mt-3 flex w-full items-center justify-between gap-2 rounded-[12px] border border-white/10 bg-transparent px-3 py-2 text-start text-[12px] font-bold leading-snug text-white/50 hover:border-white/20 hover:text-white/80"
+                  aria-expanded={skillsOpen}
                 >
-                  <span>{tr("معاينة: المهارات والتوظيف", "Preview: skills & hiring")}</span>
-                  <ChevronDown size={16} className={`shrink-0 transition-transform ${skillsOpen ? "rotate-180" : ""}`} aria-hidden />
+                  <span>{tr("معاينة · مهارات وتوظيف", "Preview · skills & hiring")}</span>
+                  <ChevronDown size={14} className={`shrink-0 transition-transform ${skillsOpen ? "rotate-180" : ""}`} aria-hidden />
                 </button>
                 {skillsOpen && (
                   <div className="mt-1 flex flex-col gap-0.5 border-s border-white/10 ps-2">
                     {skillsItems.map((item) => (
                       <SideNavLink key={item.to} {...item} />
                     ))}
+                    <p className="m-0 px-1 pt-1 text-[11px] text-white/40">{tr("بيانات عينة · ليست مسار العرض", "Sample data · not the demo path")}</p>
                   </div>
                 )}
-                <p className="m-0 mt-1 px-1 text-[11px] text-white/45">{tr("بيانات عينة", "Sample data")}</p>
               </div>
             )}
           </nav>

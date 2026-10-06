@@ -9,7 +9,7 @@
 | Phases 0–5 (audit → seed → engine → interpret → analysis/plan → employee view) | **Done** for the Ahmed demo path |
 | `/api` routes: readiness, interpret-feedback, ratings-confirm, analysis, plan, health, reset-demo | **Live** |
 | UI focus pass (behavioral nav primary, flow stepper, feedback/profile polish, empty/loading/error, demo reset) | **Done** |
-| Analysis & plan: generate **on button click** (not auto); What-if comparison always visible | **Done** |
+| Analysis & plan: generate **on button click**; **reload stored** on enter (`force: false`); What-if always visible | **Done** |
 | Demo presentation language | **Arabic-first** (UI chrome bilingual; rehearse AI generate in Arabic) |
 | Skills / hiring screens | Still secondary (local mocks); collapsed under nav |
 | Production deploy rehearsal + pinned Arabic fallbacks for stage | **Next** |
@@ -383,7 +383,7 @@ Pre-generate and store the analysis and plan for the three seed employees (`deve
 
 Return `{ ok: boolean, data?, error? }` consistently. Validate all inputs.
 
-**UI notes (analysis screen):** do not auto-call `/api/analysis` or `/api/plan` on page enter or language change. User clicks **Generate**. Chrome (nav/labels) follows UI language immediately; AI body text stays in the language it was generated in until the next Generate. Demo day: stay on Arabic and generate once.
+**UI notes (analysis screen):** On enter, load **stored** analysis/plan only (`force: false`, no LLM). User clicks **Generate / Refresh** (`force: true`) to run the model and save. Chrome follows UI language; AI body stays in the language it was stored/generated in. Demo day: Arabic + one Generate ahead of time so reload shows «نتيجة محفوظة».
 
 ---
 

@@ -77,6 +77,38 @@ describe("validateProposals", () => {
     expect(dropped[0]?.reason).toBe("unknown_behavior")
   })
 
+  it("normalizes Arabic display names to keys", () => {
+    const { valid, dropped } = validateProposals(free, [
+      {
+        behavior_key: "التفويض والثقة",
+        level: 50,
+        quote: "redoes it himself overnight",
+        rationale: "x",
+      },
+      {
+        behavior_key: "Conflict handling",
+        level: 25,
+        quote: "went quiet and the issue stayed unresolved",
+        rationale: "y",
+      },
+    ])
+    expect(dropped).toHaveLength(0)
+    expect(valid.map((v) => v.behavior_key).sort()).toEqual(["conflict", "delegation"])
+  })
+
+  it("accepts alternate key field names from flash-lite", () => {
+    const { valid, dropped } = validateProposals(free, [
+      {
+        behaviorKey: "delegation",
+        level: 50,
+        quote: "redoes it himself overnight",
+        rationale: "x",
+      } as unknown as { behavior_key: string; level: number; quote: string; rationale: string },
+    ])
+    expect(dropped).toHaveLength(0)
+    expect(valid[0]?.behavior_key).toBe("delegation")
+  })
+
   it("drops bad level", () => {
     const { dropped } = validateProposals(free, [
       { behavior_key: "delegation", level: 60, quote: "redoes it himself overnight", rationale: "x" },

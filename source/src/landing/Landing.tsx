@@ -42,7 +42,7 @@ const copy = {
       ["الإنسان يقرّر", "Humans decide", "النظام يشرح ويوصي، والمدير هو من يعتمد القرار", "user"],
     ],
     stats: [
-      ["25/50/75/100", "سلّم مهارات واضح"],
+      ["مبتدئ ← نموذجي", "سلّم سلوكي واضح"],
       ["1–2", "خطوات في سلسلة الشواغر"],
       ["100%", "قرار بشري"],
     ],
@@ -85,7 +85,7 @@ const copy = {
       ["Humans decide", "الإنسان يقرّر", "The system explains and recommends; the manager approves the decision.", "user"],
     ],
     stats: [
-      ["25/50/75/100", "A clear skill scale"],
+      ["Beginner → Exemplary", "A clear behavior scale"],
       ["1–2", "Steps in the vacancy chain"],
       ["100%", "Human decision"],
     ],
@@ -217,12 +217,17 @@ export default function Landing() {
           ))}
         </div>
         <div className="stats">
-          {t.stats.map(([n, l]) => (
-            <Reveal key={n} delay={150}>
-              <b><bdi dir="ltr"><Num text={n} /></bdi></b>
-              <span>{l}</span>
-            </Reveal>
-          ))}
+          {t.stats.map(([n, l]) => {
+            const numeric = /[\d%]/.test(n)
+            return (
+              <Reveal key={n} delay={150}>
+                <b className={numeric ? undefined : "stat-words"}>
+                  {numeric ? <bdi dir="ltr"><Num text={n} /></bdi> : n}
+                </b>
+                <span>{l}</span>
+              </Reveal>
+            )
+          })}
         </div>
       </section>
 

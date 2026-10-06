@@ -28,7 +28,9 @@ export function MyReadiness() {
           <div className="text-sm text-mint">{tr("أولويتك الآن", "Your priority now")}</div>
           <div className="text-xl font-bold">{bi(SKILLS[gap.skill])}</div>
           <div className="font-num text-[40px] font-extrabold leading-none">{gap.cur} → {gap.required}</div>
-          <Link to="/app/me/plan" className="text-base font-bold text-white underline">{tr("عرض خطة التطوير", "View development plan")}</Link>
+          <Link to="/app/me/plan" className="mt-2 inline-flex items-center justify-center rounded-[12px] border border-white/40 bg-transparent px-4 py-2 text-sm font-bold text-white no-underline hover:border-mint hover:text-mint">
+            {tr("عرض خطة التطوير", "View development plan")}
+          </Link>
         </Card>
       </div>
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("مهاراتي", "My skills")}</h2>

@@ -66,9 +66,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sb = getSupabaseAdmin()
 
     if (!body.force) {
+      // Soft load: generated plans only (rows with snapshot_hash). Seed plans have null hash.
       const { data: cached } = await sb
         .from("development_plans")
-        .select("id,items,snapshot_hash,created_at")
+        .select("id,items,snapshot_hash,created_at,model")
         .eq("employee_id", employee.id)
         .eq("role_id", role.id)
         .eq("language", language)
@@ -77,20 +78,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .limit(1)
         .maybeSingle()
 
-      if (cached?.items) {
-        const items = Array.isArray(cached.items) ? cached.items : (cached.items as Plan).items
-        return res.status(200).json({
-          ok: true,
-          data: {
-            plan: { items } as Plan,
-            source: "cache",
-            saved: false,
-            model: "cache",
-            latency_ms: Date.now() - wallStart,
-            snapshot_hash: hash,
-          },
-        })
+      const { data: latest } = cached?.items
+        ? { data: cached }
+        : await sb
+            .from("development_plans")
+            .select("id,items,snapshot_hash,created_at,model")
+            .eq("employee_id", employee.id)
+            .eq("role_id", role.id)
+            .eq("language", language)
+            .not("snapshot_hash", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+      if (latest?.items) {
+        const items = Array.isArray(latest.items) ? latest.items : (latest.items as Plan).items
+        if (Array.isArray(items) && items.length) {
+          const model = (latest as { model?: string }).model ?? "cache"
+          return res.status(200).json({
+            ok: true,
+            data: {
+              plan: { items } as Plan,
+              source: "cache",
+              saved: true,
+              model,
+              latency_ms: Date.now() - wallStart,
+              snapshot_hash: hash,
+            },
+          })
+        }
       }
+
+      return res.status(200).json({
+        ok: true,
+        data: {
+          plan: null,
+          source: "none",
+          saved: false,
+          model: "",
+          latency_ms: Date.now() - wallStart,
+          snapshot_hash: hash,
+        },
+      })
     }
 
     // Prefer provided analysis; else latest stored; else template
@@ -193,7 +222,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (insErr) {
         console.warn("[plan] store_failed", { error: insErr.message })
         const slim = { employee_id: employee.id, role_id: role.id, items: plan.items, language }
-        await sb.from("development_plans").insert(slim)
+        const { error: retryErr } = await sb.from("development_plans").insert(slim)
+        saved = !retryErr
+      } else {
+        saved = true
       }
     }
 

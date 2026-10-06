@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowLeftRight, BarChart3, CheckCircle, Clock, Search, ShieldCheck, X, type LucideIcon } from "lucide-react"
+import { Link } from "react-router-dom"
+import { AlertTriangle, ArrowLeftRight, BarChart3, CheckCircle, ChevronLeft, Clock, Search, ShieldCheck, X, type LucideIcon } from "lucide-react"
 import { useApp } from "./lib/i18n"
 import { Num } from "./lib/motion"
-import { LEVEL_NAME } from "./lib/scoring.ts"
+import { LEVEL_NAME, levelStep } from "./lib/scoring.ts"
 import { ASSUMPTION_ROWS, type Explain } from "./lib/explain.ts"
 
 /* ---------- Card / Button ---------- */
@@ -62,26 +63,26 @@ export function CandidateTypeBadge({ type }: { type: "internal" | "external" }) 
 }
 
 /* ---------- Level / SkillBar ---------- */
-export function LevelLabel({ level }: { level: number | null }) {
+export function LevelLabel({ level, className = "" }: { level: number | null; className?: string }) {
   const { tr } = useApp()
-  if (level === null || Number.isNaN(level)) return <span className="text-i500">{tr("غير مقيّم", "Not assessed")}</span>
-  // Snap continuous readiness scores (e.g. 62.5) onto rubric steps; LEVEL_NAME only has 0/25/50/75/100.
-  const step = ([0, 25, 50, 75, 100] as const).includes(level as 0 | 25 | 50 | 75 | 100)
-    ? (level as 0 | 25 | 50 | 75 | 100)
-    : ((Math.max(0, Math.min(100, Math.round(level / 25) * 25)) || 0) as 0 | 25 | 50 | 75 | 100)
+  const step = levelStep(level)
+  if (step === null || step === 0) return <span className={`text-i500 ${className}`.trim()}>{tr("غير مقيّم", "Not assessed")}</span>
   const [ar, en] = LEVEL_NAME[step]
-  return (
-    <span className="whitespace-nowrap">
-      <b className="font-num font-extrabold">{level}</b> · {tr(ar, en)}
-    </span>
-  )
+  return <span className={`whitespace-nowrap font-bold ${className}`.trim()}>{tr(ar, en)}</span>
 }
 
 /** Plain divs, RTL-safe (logical inset). Marker = required level. */
 export function SkillBar({ current, required, tone = "met" }: { current: number | null; required: number; tone?: "met" | "partial" | "critical" }) {
+  const { tr } = useApp()
   const color = { met: "#0B6B4F", partial: "#8A5A00", critical: "#A32E2E" }[tone]
+  const curStep = levelStep(current)
+  const reqStep = levelStep(required)
+  const curWord =
+    curStep === null || curStep === 0 ? tr("غير مقيّم", "Not assessed") : tr(LEVEL_NAME[curStep][0], LEVEL_NAME[curStep][1])
+  const reqWord =
+    reqStep === null || reqStep === 0 ? String(required) : tr(LEVEL_NAME[reqStep][0], LEVEL_NAME[reqStep][1])
   return (
-    <div className="relative h-3 w-full rounded-full bg-i100" role="img" aria-label={`${current ?? "—"} / ${required}`}>
+    <div className="relative h-3 w-full rounded-full bg-i100" role="img" aria-label={`${curWord} / ${reqWord}`}>
       <div className="bar-fill h-3 rounded-full" style={{ width: `${current ?? 0}%`, background: color }} />
       <div className="absolute -top-1 h-5 w-[3px] rounded bg-i900" style={{ insetInlineStart: `calc(${required}% - 1px)` }} />
     </div>
@@ -188,11 +189,25 @@ export function HowLink({ explain, label, compact }: { explain: Explain; label?:
   const { tr } = useApp()
   return (
     <button
+      type="button"
       onClick={() => open(explain)}
-      className="whitespace-nowrap border-0 bg-transparent p-0 text-sm font-bold text-flow underline"
+      className={`inline-flex items-center rounded-[8px] border border-i100 bg-white px-2.5 py-1 font-bold text-flow hover:border-flow ${compact ? "text-[12px]" : "text-sm"}`}
     >
       {label ?? (compact ? tr("الشرح", "Explain") : tr("كيف حُسب؟", "How calculated?"))}
     </button>
+  )
+}
+
+/** Clear “go back” control — not a bare text link. */
+export function BackLink({ to, label }: { to: string; label: string }) {
+  return (
+    <Link
+      to={to}
+      className="mb-4 inline-flex items-center gap-1.5 rounded-[10px] border border-i100 bg-white px-3 py-2 text-sm font-bold text-ink no-underline hover:border-flow hover:text-flow"
+    >
+      <ChevronLeft size={16} className="shrink-0 rtl:rotate-180" aria-hidden />
+      {label}
+    </Link>
   )
 }
 

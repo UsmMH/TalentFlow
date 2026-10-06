@@ -6,7 +6,7 @@ import { Num } from "./lib/motion"
 import { b, CANDIDATES, CHAINS, COMPANY, LONG_NAME_CANDIDATE, REQUIREMENTS, ROLES, SKILLS, SOURCE_DATE, SOURCE_NAME, type Candidate, type SkillId, type Source } from "./lib/demo-data.ts"
 import { byId, matchScore, options, skillAverage, timeCost } from "./lib/scoring.ts"
 import { explainAI, explainCost, explainMatch, explainSkill } from "./lib/explain.ts"
-import { Btn, Card, CandidateTypeBadge, Dialog, FlowChain, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge } from "./ui"
+import { BackLink, Btn, Card, CandidateTypeBadge, Dialog, FlowChain, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge } from "./ui"
 
 const R = "/app/roles/senior-data-analyst"
 const th = "px-4 py-3 text-start text-sm font-bold text-i500"
@@ -55,7 +55,11 @@ export function Overview() {
                 <td className="px-4 py-4 font-num text-xl font-extrabold"><Num text={r.id === "senior-data-analyst" ? `${top}%` : r.topMatch ? `${r.topMatch}%` : "—"} /></td>
                 <td className="px-4 py-4 text-end">
                   {r.statusTone === "done" ? <span className="text-sm text-i500">—</span>
-                    : <Link to={r.id === "senior-data-analyst" ? R : `${R}?demo=empty`} className="text-sm font-bold text-flow underline">{tr("عرض المرشحين", "View candidates")}</Link>}
+                    : (
+                      <Link to={r.id === "senior-data-analyst" ? R : `${R}?demo=empty`}>
+                        <Btn kind="outline" className="px-4 py-2 text-sm">{tr("عرض المرشحين", "View candidates")}</Btn>
+                      </Link>
+                    )}
                 </td>
               </tr>
             ))}
@@ -121,7 +125,7 @@ export function CreateRole() {
           <span className="text-sm text-i500">{tr("ملف بصيغة بي دي إف أو وورد", "PDF or Word")}</span>
         </button>
         <input ref={file} type="file" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0].name)} />
-        <button className="self-start border-0 bg-transparent p-0 text-sm font-bold text-flow underline" onClick={() => upload("jd.pdf")}>{tr("استخدم وصفاً تجريبياً", "Use a sample description")}</button>
+        <Btn kind="outline" className="self-start px-4 py-2 text-sm" onClick={() => upload("jd.pdf")}>{tr("استخدم وصفاً تجريبياً", "Use a sample description")}</Btn>
       </Card>
 
       {phase === "loading" && <Card className="flex flex-col gap-3 p-6"><b role="status">{tr("جارٍ استخراج المهارات…", "Extracting skills…")}</b><Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" /></Card>}
@@ -135,8 +139,12 @@ export function CreateRole() {
                 <div className="flex items-center gap-2"><b className="text-base text-ink">{r.label}</b>{r.suggested && !r.accepted && <span className="rounded-full bg-mist px-2 py-1 text-[13px] font-bold text-i700">{tr("مقترح", "Suggested")}</span>}</div>
                 <span className="text-sm text-i500">{tr("الوزن", "Weight")}: <b className="font-num">{w[i]}%</b></span>
               </div>
-              <div className="flex overflow-hidden rounded-[12px] border border-i100" role="group" aria-label={tr("المستوى المطلوب", "Required level")}>
-                {[25, 50, 75, 100].map((l) => <button key={l} className={seg(r.level === l)} onClick={() => patch(i, { level: l })}><span className="font-num">{l}</span></button>)}
+              <div className="flex flex-wrap gap-1" role="group" aria-label={tr("المستوى المطلوب", "Required level")}>
+                {([25, 50, 75, 100] as const).map((l) => (
+                  <button key={l} type="button" className={seg(r.level === l)} onClick={() => patch(i, { level: l })}>
+                    <LevelLabel level={l} />
+                  </button>
+                ))}
               </div>
               <div className="flex gap-1">
                 {([[3, "عالية", "High"], [2, "متوسطة", "Medium"], [1, "منخفضة", "Low"]] as const).map(([v, a, e]) => <button key={v} className={chip(r.imp === v)} onClick={() => patch(i, { imp: v })}>{tr(a, e)}</button>)}
@@ -238,7 +246,7 @@ export function CandidateDetail() {
   const sv = { met: "met", partial: "partial", critical: "critical", notAssessed: "notAssessed" } as const
   return (
     <>
-      <Link to={R} className="mb-4 inline-block text-sm font-bold text-flow underline">{tr("ترتيب المرشحين", "Candidate ranking")}</Link>
+      <BackLink to={R} label={tr("العودة إلى ترتيب المرشحين", "Back to candidate ranking")} />
       <Card className="mb-6 flex flex-wrap items-center justify-between gap-6 p-6">
         <div className="min-w-0">
           <h1 className="m-0 text-[28px] font-bold text-ink">{bi(c.name)}</h1>
@@ -274,7 +282,12 @@ export function CandidateDetail() {
       {chain ? (
         <div className="flex flex-col gap-3">
           <FlowChain nodes={chain.nodes.map((x) => ({ title: bi(x.title), sub: bi(x.sub) }))} />
-          <div className="flex flex-wrap items-center gap-4"><StatusBadge v={chain.impact === "high" ? "highImpact" : "met"} label={chain.impact === "low" ? tr("أثر منخفض", "Low impact") : undefined} /><Link to={`${R}/chain`} className="text-sm font-bold text-flow underline">{tr("عرض سلسلة الشواغر كاملة", "View the full vacancy chain")}</Link></div>
+          <div className="flex flex-wrap items-center gap-4">
+            <StatusBadge v={chain.impact === "high" ? "highImpact" : "met"} label={chain.impact === "low" ? tr("أثر منخفض", "Low impact") : undefined} />
+            <Link to={`${R}/chain`}>
+              <Btn kind="outline" className="px-4 py-2 text-sm">{tr("عرض سلسلة الشواغر كاملة", "View the full vacancy chain")}</Btn>
+            </Link>
+          </div>
         </div>
       ) : <Card className="p-6"><StatusBadge v="noImpact" /></Card>}
       <span className="hidden">{n(0)}</span>

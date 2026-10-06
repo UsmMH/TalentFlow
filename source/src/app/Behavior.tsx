@@ -1,16 +1,16 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
+import { ChevronDown } from "lucide-react"
 import { useApp } from "./lib/i18n"
-import { PROMOTION_COST as P } from "./lib/assumptions.ts"
-import { PATH_NAME, RATER_NAME, ROLE, explainBehavior, explainReadiness, readiness, whatIf, type BId, type Rater } from "./lib/behavior.ts"
+import { PATH_NAME, RATER_NAME, ROLE, explainReadiness, readiness, whatIf, type BId, type Rater } from "./lib/behavior.ts"
 import { useBehaviorData } from "./lib/behavior-data"
 import { describeApiError, postJson } from "./lib/api"
 import { supabase, supabaseConfigured } from "./lib/supabase"
-import { Btn, Card, Dialog, HowLink, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge, type Variant } from "./ui"
+import { BackLink, Btn, Card, Dialog, KpiTile, LevelLabel, PageTitle, ScoreCell, SkillBar, Skeleton, StatusBadge, type Variant } from "./ui"
 
 const B = "/app/behavior"
 /** Must exceed /api/interpret-feedback LLM budget (cold start + OpenRouter on Vercel). */
-const INTERPRET_CLIENT_TIMEOUT_MS = 35_000
+const INTERPRET_CLIENT_TIMEOUT_MS = 50_000
 const th = "px-4 py-3 text-start text-sm font-bold text-i500"
 const pathV = { now: "met", develop: "partial", specialist: "notAssessed", insufficient: "lowConf" } as const
 const tone = (s: string) => (s === "critical" ? "critical" : s === "partial" ? "partial" : "met") as "met" | "partial" | "critical"
@@ -21,44 +21,43 @@ function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? v : []
 }
 
-type FlowStep = "feedback" | "review" | "readiness" | "analysis" | "plan"
-
-function FlowStepper({ step }: { step: FlowStep }) {
-  const { tr } = useApp()
-  const steps: { id: FlowStep; label: string; to: string }[] = [
-    { id: "feedback", label: tr("الملاحظات", "Feedback"), to: `${B}/rate` },
-    { id: "review", label: tr("مراجعة الاقتراحات", "Review suggestions"), to: `${B}/rate` },
-    { id: "readiness", label: tr("الجاهزية", "Readiness"), to: B },
-    { id: "analysis", label: tr("التحليل", "Analysis"), to: `${B}/ahmad/analysis` },
-    { id: "plan", label: tr("الخطة", "Plan"), to: "/app/me/behavior" },
-  ]
-  const idx = steps.findIndex((s) => s.id === step)
-  const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : null
+function ExpandSection({
+  title,
+  summary,
+  open: initiallyOpen = false,
+  children,
+}: {
+  title: string
+  summary?: string
+  open?: boolean
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(initiallyOpen)
   return (
-    <div className="mb-6">
-      <ol className="m-0 flex list-none flex-wrap items-center gap-1.5 p-0" aria-label={tr("مسار العرض", "Demo flow")}>
-        {steps.map((s, i) => {
-          const on = s.id === step
-          return (
-            <li key={s.id} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-xs text-i500" aria-hidden>›</span>}
-              <Link
-                to={s.to}
-                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-bold no-underline sm:px-3 sm:text-[13px] ${on ? "bg-ink text-white" : "bg-mist text-i700 hover:text-ink"}`}
-                aria-current={on ? "step" : undefined}
-              >
-                {s.label}
-              </Link>
-            </li>
-          )
-        })}
-      </ol>
-      {next && (
-        <p className="m-0 mt-3 text-sm">
-          <span className="text-i500">{tr("الخطوة التالية:", "Next step:")} </span>
-          <Link to={next.to} className="font-bold text-flow underline">{next.label}</Link>
-        </p>
-      )}
+    <div className="mb-3 overflow-hidden rounded-[16px] border border-i100 bg-white">
+      <button
+        type="button"
+        className="flex w-full items-start justify-between gap-3 border-0 bg-transparent px-5 py-4 text-start"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="min-w-0">
+          <div className="text-base font-bold text-ink">{title}</div>
+          {summary && <p className="m-0 mt-1 text-sm leading-[1.6] text-i700">{summary}</p>}
+        </div>
+        <ChevronDown
+          size={20}
+          className={`mt-0.5 shrink-0 text-flow transition-transform duration-300 ease-out ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
+      </button>
+      <div
+        className={`expand-panel grid transition-[grid-template-rows,opacity] duration-300 ease-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="border-t border-i100 px-5 py-4">{children}</div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -89,28 +88,49 @@ function DataNotice({ error, empty, emptyHint }: { error?: string | null; empty?
   return null
 }
 
-/** Highlight the first case-insensitive occurrence of `quote` inside `text`. */
-function HighlightedText({ text, quote }: { text: string; quote: string }) {
-  const q = quote.trim()
-  if (!q) return <span>{text}</span>
+/** Highlight several quotes in one text, each with its own color. */
+const SUGGEST_COLORS = [
+  { mark: "bg-[#DDF5E9]", edge: "#2A9B6A" },
+  { mark: "bg-[#FFE8CC]", edge: "#D97706" },
+  { mark: "bg-[#D6EEF8]", edge: "#0284C7" },
+  { mark: "bg-[#F5E0D8]", edge: "#C45C3E" },
+  { mark: "bg-[#E8EDD9]", edge: "#6B7F3A" },
+  { mark: "bg-[#E8E8EE]", edge: "#5A5F7A" },
+] as const
+
+function MultiHighlight({ text, quotes }: { text: string; quotes: string[] }) {
   const lower = text.toLowerCase()
-  const iq = q.toLowerCase()
-  const at = lower.indexOf(iq)
-  if (at < 0) {
-    return (
-      <>
-        <span>{text}</span>
-        <p className="m-0 mt-2 rounded-[8px] bg-mist px-2 py-1 text-sm text-i700">«{quote}»</p>
-      </>
-    )
+  type Range = { start: number; end: number; color: number }
+  const ranges: Range[] = []
+  quotes.forEach((quote, color) => {
+    const q = quote.trim()
+    if (!q) return
+    const at = lower.indexOf(q.toLowerCase())
+    if (at < 0) return
+    ranges.push({ start: at, end: at + q.length, color: color % SUGGEST_COLORS.length })
+  })
+  ranges.sort((a, b) => a.start - b.start || b.end - a.end)
+  const picked: Range[] = []
+  let cursor = 0
+  for (const r of ranges) {
+    if (r.start < cursor) continue
+    picked.push(r)
+    cursor = r.end
   }
-  return (
-    <span>
-      {text.slice(0, at)}
-      <mark className="rounded-[4px] bg-[#DDF5E9] px-0.5 text-ink">{text.slice(at, at + q.length)}</mark>
-      {text.slice(at + q.length)}
-    </span>
-  )
+  if (!picked.length) return <span>{text}</span>
+  const nodes: ReactNode[] = []
+  let i = 0
+  for (const r of picked) {
+    if (r.start > i) nodes.push(<span key={`t${i}`}>{text.slice(i, r.start)}</span>)
+    nodes.push(
+      <mark key={`m${r.start}`} className={`rounded-[4px] px-0.5 text-ink ${SUGGEST_COLORS[r.color]!.mark}`}>
+        {text.slice(r.start, r.end)}
+      </mark>,
+    )
+    i = r.end
+  }
+  if (i < text.length) nodes.push(<span key={`t${i}`}>{text.slice(i)}</span>)
+  return <span>{nodes}</span>
 }
 
 function rubricLine(rubric: Record<string, { ar: string; en: string }> | undefined, level: number, lang: string) {
@@ -152,18 +172,16 @@ function AiTag({ confirmed }: { confirmed: boolean }) {
     : <span className="rounded-full border border-dashed border-i500 px-2 py-1 text-[13px] font-bold text-i500">{tr("مقترح من الذكاء الاصطناعي · بانتظار التأكيد", "AI-suggested · awaiting confirmation")}</span>
 }
 
-/* ============ Readiness list ============ */
+/* ============ Team readiness (KPIs) ============ */
 export function BehaviorOverview() {
   const { tr, bi } = useApp()
-  const nav = useNavigate()
   const data = useBehaviorData()
-  const rows = data.employees.map((e) => ({ e, m: readiness(e.ratings, e.ratingDates, data.roleReqs) })).sort((a, z) => z.m.exact - a.m.exact)
+  const rows = data.employees.map((e) => ({ e, m: readiness(e.ratings, e.ratingDates, data.roleReqs) }))
   const count = (p: string) => rows.filter((r) => r.m.path === p).length
   if (data.loading) {
     return (
       <>
         <PageTitle>{tr("جاهزية الدور", "Role readiness")}</PageTitle>
-        <FlowStepper step="readiness" />
         <Skeleton className="mb-4 h-24" /><Skeleton className="h-48" />
       </>
     )
@@ -173,39 +191,71 @@ export function BehaviorOverview() {
       <PageTitle sub={tr("قبل قرار الترقية: هل تدعم الأدلة سلوكياً هذا الانتقال؟", "Before the promotion decision: does the evidence support this move behaviorally?")}>
         {tr("جاهزية الدور", "Role readiness")} · {bi(ROLE)}
       </PageTitle>
-      <FlowStepper step="readiness" />
       <DataNotice
         error={data.error}
         empty={rows.length === 0}
         emptyHint={tr("لا يوجد موظفون في هذا العرض بعد.", "No employees in this view yet.")}
       />
       {data.error && !data.employees.length ? null : (
-        <>
-          <div className="mb-8 grid gap-4 md:grid-cols-3">
-            <KpiTile label={tr("جاهزون الآن", "Ready now")} value={`${count("now")}`} context={tr(`من ${rows.length} موظفين`, `of ${rows.length} employees`)} />
-            <KpiTile label={tr("يحتاجون تطويراً أولاً", "Need development first")} value={`${count("develop")}`} context={tr("ثم إعادة التقييم", "then re-evaluate")} />
-            <KpiTile label={tr("مسار أخصائي أول", "Senior specialist track")} value={`${count("specialist")}`} context={tr("ليس كل موظف يصبح مديراً", "Not everyone should become a manager")} />
-          </div>
-          <Card className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead><tr className="border-b border-i100">{[tr("الموظف", "Employee"), tr("تغطية الأدلة", "Evidence coverage"), tr("السلوك الحرج", "Critical behavior"), tr("الثقة", "Confidence"), tr("المسار المقترح", "Suggested path")].map((h) => <th key={h} className={th}>{h}</th>)}</tr></thead>
-              <tbody>
-                {rows.map(({ e, m }) => (
-                  <tr key={e.slug} onClick={() => nav(`${B}/${e.slug}`)} className={`cursor-pointer border-b border-i100 last:border-0 hover:bg-mist ${e.slug === "ahmad" ? "flash-row" : ""}`}>
-                    <td className="px-4 py-4"><div className="text-base font-bold text-ink">{bi(e.name)}</div><div className="text-sm text-i500">{bi(e.role)}</div></td>
-                    <td className="px-4 py-4" onClick={(ev) => ev.stopPropagation()}><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} /></td>
-                    <td className="px-4 py-4">{m.criticalMissing.length ? <StatusBadge v="critical" /> : <StatusBadge v="met" />}</td>
-                    <td className="px-4 py-4"><StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} /></td>
-                    <td className="px-4 py-4"><StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </>
+        <div className="mb-8 grid gap-4 md:grid-cols-3">
+          <KpiTile label={tr("جاهزون الآن", "Ready now")} value={`${count("now")}`} context={tr(`من ${rows.length} موظفين`, `of ${rows.length} employees`)} />
+          <KpiTile label={tr("يحتاجون تطويراً أولاً", "Need development first")} value={`${count("develop")}`} context={tr("ثم إعادة التقييم", "then re-evaluate")} />
+          <KpiTile label={tr("مسار أخصائي أول", "Senior specialist track")} value={`${count("specialist")}`} context={tr("ليس كل موظف يصبح مديراً", "Not everyone should become a manager")} />
+        </div>
       )}
       <p className="mt-4 max-w-[720px] text-sm leading-[1.7] text-i500">{tr("هذه إشارات جاهزية مبنية على الأدلة وما ينقصها، وليست توقعاً لنجاح أحد. القرار النهائي للمدير والموارد البشرية.", "These are readiness signals based on evidence and what is missing, not a prediction of anyone's success. The final decision is the manager's and HR's.")}</p>
-      <div className="mt-4"><Link to={`${B}/rate`} className="text-sm font-bold text-flow underline">{tr("جمع الملاحظات", "Collect feedback")}</Link></div>
+    </>
+  )
+}
+
+/* ============ Employee files (team list → profile) ============ */
+export function EmployeeFiles() {
+  const { tr, bi } = useApp()
+  const nav = useNavigate()
+  const data = useBehaviorData()
+  const rows = data.employees.map((e) => ({ e, m: readiness(e.ratings, e.ratingDates, data.roleReqs) })).sort((a, z) => z.m.exact - a.m.exact)
+  if (data.loading) {
+    return (
+      <>
+        <PageTitle>{tr("ملفات الموظفين", "Employee files")}</PageTitle>
+        <Skeleton className="h-48" />
+      </>
+    )
+  }
+  return (
+    <>
+      <PageTitle sub={tr("اختر موظفاً لعرض الملف السلوكي.", "Pick an employee to open their behavioral file.")}>
+        {tr("ملفات الموظفين", "Employee files")}
+      </PageTitle>
+      <DataNotice
+        error={data.error}
+        empty={rows.length === 0}
+        emptyHint={tr("لا يوجد موظفون في هذا العرض بعد.", "No employees in this view yet.")}
+      />
+      {data.error && !data.employees.length ? null : (
+        <Card className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-i100">
+                {[tr("الموظف", "Employee"), tr("تغطية الأدلة", "Evidence coverage"), tr("السلوك الحرج", "Critical behavior"), tr("الثقة", "Confidence"), tr("المسار المقترح", "Suggested path")].map((h) => (
+                  <th key={h} className={th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ e, m }) => (
+                <tr key={e.slug} onClick={() => nav(`${B}/${e.slug}`)} className={`cursor-pointer border-b border-i100 last:border-0 hover:bg-mist ${e.slug === "ahmad" ? "flash-row" : ""}`}>
+                  <td className="px-4 py-4"><div className="text-base font-bold text-ink">{bi(e.name)}</div><div className="text-sm text-i500">{bi(e.role)}</div></td>
+                  <td className="px-4 py-4" onClick={(ev) => ev.stopPropagation()}><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} /></td>
+                  <td className="px-4 py-4">{m.criticalMissing.length ? <StatusBadge v="critical" /> : <StatusBadge v="met" />}</td>
+                  <td className="px-4 py-4"><StatusBadge v={m.confidence === "high" ? "highConf" : "lowConf"} /></td>
+                  <td className="px-4 py-4"><StatusBadge v={pathV[m.path]} label={bi(PATH_NAME[m.path])} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
     </>
   )
 }
@@ -215,13 +265,13 @@ export function BehaviorProfile() {
   const { tr, bi } = useApp()
   const { id } = useParams()
   const data = useBehaviorData()
-  const [evidenceOpen, setEvidenceOpen] = useState(false)
   if (data.loading) return <><PageTitle>{tr("ملف الموظف", "Employee profile")}</PageTitle><Skeleton className="h-48" /></>
   const e = data.emp(id ?? "ahmad")
+  const back = <BackLink to={`${B}/files`} label={tr("العودة إلى ملفات الموظفين", "Back to employee files")} />
   if (!e) {
     return (
       <>
-        <Link to={B} className="mb-4 inline-block text-sm font-bold text-flow underline">{tr("جاهزية الدور", "Role readiness")}</Link>
+        {back}
         <DataNotice empty emptyHint={tr("لم يُعثر على هذا الموظف.", "Employee not found.")} />
       </>
     )
@@ -231,7 +281,7 @@ export function BehaviorProfile() {
   const blinds = m.parts.filter((p) => p.blind)
   return (
     <>
-      <Link to={B} className="mb-4 inline-block text-sm font-bold text-flow underline">{tr("جاهزية الدور", "Role readiness")}</Link>
+      {back}
       <DataNotice error={data.error} />
 
       {/* Scorecard first */}
@@ -287,40 +337,33 @@ export function BehaviorProfile() {
           </div>
         )}
 
-        {e.slug === "ahmad" && (
-          <Link to={`${B}/ahmad/analysis`}>
-            <Btn>{tr("توليد تحليل التطوير", "Generate development analysis")}</Btn>
-          </Link>
-        )}
+        <Link to={`${B}/${e.slug}/analysis`}>
+          <Btn>{tr("تحليل التطوير والخطة", "Development analysis & plan")}</Btn>
+        </Link>
       </Card>
 
-      <button
-        type="button"
-        className="mb-3 border-0 bg-transparent p-0 text-sm font-bold text-flow underline"
-        onClick={() => setEvidenceOpen((v) => !v)}
-        aria-expanded={evidenceOpen}
+      <ExpandSection
+        title={tr("الأدلة والحساب", "Evidence & calculation")}
+        summary={tr("مصادر التقييم والاقتباسات لكل سلوك.", "Rating sources and quotes per behavior.")}
       >
-        {tr("كيف حُسب هذا؟", "How was this calculated?")}
-      </button>
-      {evidenceOpen && (
-        <div className="mb-8 grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2">
           {m.parts.map((p) => (
-            <Card key={p.id} className="flex flex-col gap-3 p-6">
+            <div key={p.id} className="flex flex-col gap-3 rounded-[12px] border border-i100 bg-mist p-4">
               <div className="flex items-center justify-between gap-2">
-                <b className="text-xl text-ink">{bi(data.behaviors[p.id].name)}</b>
+                <b className="text-base text-ink">{bi(data.behaviors[p.id].name)}</b>
                 <StatusBadge v={p.status as Variant} />
               </div>
               <p className="m-0 text-sm leading-[1.6] text-i500">{bi(data.behaviors[p.id].anchor)}</p>
               <div className="flex flex-wrap gap-2 text-sm text-i700">
                 {(["manager", "peer", "document", "self"] as Rater[]).map((k) => (
-                  <span key={k} className="rounded-full border border-i100 px-3 py-1">{bi(RATER_NAME[k])}: <b className="font-num">{e.ratings[p.id][k] ?? "—"}</b></span>
+                  <span key={k} className="rounded-full border border-i100 bg-white px-3 py-1">{bi(RATER_NAME[k])}: <b className="font-num">{e.ratings[p.id][k] ?? "—"}</b></span>
                 ))}
               </div>
               {(quotes[p.id] ?? []).length === 0 && (
                 <p className="m-0 text-sm text-i500">{tr("لا توجد اقتباسات أدلة لهذا السلوك.", "No evidence quotes for this behavior.")}</p>
               )}
               {(quotes[p.id] ?? []).map((q, i) => (
-                <div key={i} className="rounded-[12px] bg-mist p-3 text-sm leading-[1.7] text-i900">
+                <div key={i} className="rounded-[12px] bg-white p-3 text-sm leading-[1.7] text-i900">
                   <div>{bi(q.text)}</div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="text-i500">{q.source === "retro" ? tr("مراجعة المشروع", "Project retrospective") : bi(RATER_NAME[q.source])}</span>
@@ -328,300 +371,449 @@ export function BehaviorProfile() {
                   </div>
                 </div>
               ))}
-              <HowLink explain={explainBehavior(e, p.id)} label={tr("كيف حُسب؟", "How calculated?")} />
-            </Card>
+            </div>
           ))}
         </div>
-      )}
+      </ExpandSection>
     </>
   )
 }
 
 /* ============ Individual Development Analysis ============ */
 export function Analysis() {
-  // Demo presentation is Arabic-first; generate on click only (no auto-fetch / no lang-triggered regen).
-  const { tr, bi, n, lang } = useApp()
+  // Arabic-first demo: load stored on enter (no LLM); Generate forces a new run and saves.
+  const { tr, bi, lang, approved, setApproved } = useApp()
   const nav = useNavigate()
+  const { id: routeId } = useParams()
   const data = useBehaviorData()
-  const e = data.emp("ahmad")
+  const slug = routeId && data.employees.some((x) => x.slug === routeId) ? routeId : "ahmad"
+  const e = data.emp(slug)
   const m = readiness(e.ratings, e.ratingDates, data.roleReqs)
   const m2 = readiness(whatIf(e.ratings), e.ratingDates, data.roleReqs)
-  const [cost, setCost] = useState(P.replacementHiring + P.productivityLoss + P.teamTurnover)
-  const [planCost, setPlanCost] = useState(P.developmentPlan)
   const [open, setOpen] = useState(false)
-  const [done, setDone] = useState(false)
   const [analysis, setAnalysis] = useState<AnalysisPayload | null>(null)
   const [plan, setPlan] = useState<PlanPayload | null>(null)
   const [loadingAi, setLoadingAi] = useState(false)
+  const [loadingStored, setLoadingStored] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [savedNote, setSavedNote] = useState(false)
-  const [aiMeta, setAiMeta] = useState<string>("")
 
-  async function loadAi() {
-    setLoadingAi(true)
+  const pickEmployee = (next: string) => {
+    if (next === slug) return
+    setAnalysis(null)
+    setPlan(null)
     setAiError(null)
+    setSavedNote(false)
+    setApproved(false)
+    nav(`${B}/${next}/analysis`)
+  }
+
+  async function loadAi(force: boolean, forSlug = slug) {
+    if (force) {
+      setLoadingAi(true)
+      setAiError(null)
+    } else {
+      setLoadingStored(true)
+    }
     try {
-      const body = { slug: "ahmad", role_slug: "team-manager", language: lang, force: true }
+      const body = { slug: forSlug, role_slug: "team-manager", language: lang, force }
+      const timeoutMs = force ? 25_000 : 12_000
       const [aRes, pRes] = await Promise.all([
         postJson<{
-          analysis: AnalysisPayload
+          analysis: AnalysisPayload | null
           source: string
           saved: boolean
           model: string
           latency_ms: number
-        }>("/api/analysis", body, { timeoutMs: 25_000 }),
+        }>("/api/analysis", body, { timeoutMs }),
         postJson<{
-          plan: PlanPayload
+          plan: PlanPayload | null
           source: string
           saved: boolean
           model: string
           latency_ms: number
-        }>("/api/plan", body, { timeoutMs: 25_000 }),
+        }>("/api/plan", body, { timeoutMs }),
       ])
       if (!aRes.ok) {
-        setAiError(describeApiError(aRes.error, tr))
+        if (force) setAiError(describeApiError(aRes.error, tr))
         return
       }
       if (aRes.data.analysis && typeof aRes.data.analysis === "object") {
         setAnalysis(aRes.data.analysis)
+        const stored = aRes.data.source === "cache" || aRes.data.source === "seed" || aRes.data.saved
+        setSavedNote(stored)
+      } else {
+        setAnalysis(null)
+        setSavedNote(false)
       }
-      setSavedNote(Boolean(aRes.data.saved) || aRes.data.source === "seed")
-      setAiMeta(`${aRes.data.source}/${aRes.data.model}`)
       if (pRes.ok && pRes.data.plan?.items) {
         setPlan(pRes.data.plan)
-        if (pRes.data.saved || pRes.data.source === "seed") setSavedNote(true)
+        if (pRes.data.saved || pRes.data.source === "seed" || pRes.data.source === "cache") setSavedNote(true)
+      } else {
+        setPlan(null)
       }
     } catch (err) {
-      setAiError(describeApiError(err instanceof Error ? err.message : "Network error", tr))
+      if (force) setAiError(describeApiError(err instanceof Error ? err.message : "Network error", tr))
     } finally {
       setLoadingAi(false)
+      setLoadingStored(false)
     }
   }
+
+  useEffect(() => {
+    if (data.loading) return
+    setAnalysis(null)
+    setPlan(null)
+    setAiError(null)
+    setSavedNote(false)
+    void loadAi(false, slug)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload stored when employee or language changes; no LLM
+  }, [data.loading, lang, slug])
 
   const aiStrengths = asArray<AnalysisPayload["strengths"][number]>(analysis?.strengths)
   const aiGaps = asArray<AnalysisPayload["development_areas"][number]>(analysis?.development_areas)
   const aiBlind = asArray<AnalysisPayload["blind_spots"][number]>(analysis?.blind_spots)
-  const strengths = aiStrengths.length
-    ? aiStrengths
-    : m.parts.filter((p) => p.status === "met").map((p) => ({ behavior_key: p.id, evidence: "" }))
-  const gaps = aiGaps.length
-    ? aiGaps
-    : m.parts.filter((p) => p.status !== "met").map((p) => ({ behavior_key: p.id, evidence: "", why_it_matters: "" }))
-  const blind = aiBlind.length
-    ? aiBlind
-    : m.parts.filter((p) => p.blind).map((p) => ({ behavior_key: p.id, explanation: "" }))
   const pathOptions = asArray<NonNullable<AnalysisPayload["path_options"]>[number]>(analysis?.path_options)
   const missingEvidence = asArray<string>(analysis?.readiness_view?.missing_evidence)
+  const evidenceFor = asArray<string>(analysis?.readiness_view?.evidence_for)
+  const evidenceAgainst = asArray<string>(analysis?.readiness_view?.evidence_against)
   const planItems = asArray<PlanPayload["items"][number]>(plan?.items)
   const delegPart = m.parts.find((p) => p.id === "delegation") ?? m.parts[0]
   const delegPart2 = m2.parts.find((p) => p.id === "delegation") ?? m2.parts[0]
+  const hasAi = Boolean(analysis)
+  const name = bi(e.name)
 
-  if (data.loading) return <><PageTitle>{tr("تحليل التطوير الفردي", "Individual development analysis")}</PageTitle><FlowStepper step="analysis" /><Skeleton className="h-48" /></>
-  const input = "w-[160px] rounded-[12px] border border-i100 bg-white px-3 py-2 text-base"
+  if (data.loading) return <><PageTitle>{tr("تحليل التطوير الفردي", "Individual development analysis")}</PageTitle><Skeleton className="h-48" /></>
 
-  if (done)
+  if (approved)
     return (
       <Card className="pop mx-auto max-w-[640px] p-8 text-center">
         <StatusBadge v="met" label={tr("تم الاعتماد", "Approved")} />
-        <p className="mt-4 text-xl font-bold leading-[1.6] text-ink">{tr("تم اعتماد المسار: التطوير أولاً ثم إعادة التقييم. أُرسلت الخطة إلى أحمد.", "Path approved: develop first, then re-evaluate. The plan was sent to Ahmad.")}</p>
-        <Btn className="mt-6" onClick={() => nav("/app/me/behavior")}>{tr("عرض ملف أحمد وخطته", "View Ahmad's profile and plan")}</Btn>
+        <p className="mt-4 text-xl font-bold leading-[1.6] text-ink">
+          {tr(
+            `تم اعتماد المسار: التطوير أولاً ثم إعادة التقييم. أُرسلت الخطة إلى ${name}.`,
+            `Path approved: develop first, then re-evaluate. The plan was sent to ${name}.`,
+          )}
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <Btn onClick={() => nav(slug === "ahmad" ? "/app/me/behavior" : `${B}/${slug}`)}>
+            {slug === "ahmad"
+              ? tr("عرض ملف أحمد وخطته", "View Ahmad's profile and plan")
+              : tr("عرض الملف المحدَّث", "View updated profile")}
+          </Btn>
+          <Btn kind="outline" onClick={() => setApproved(false)}>{tr("عرض التحليل مرة أخرى", "View analysis again")}</Btn>
+        </div>
       </Card>
     )
   return (
     <>
-      <Link to={`${B}/ahmad`} className="mb-4 inline-block text-sm font-bold text-flow underline">{tr("ملف أحمد", "Ahmad's profile")}</Link>
-      <PageTitle sub={tr("شرح مبني على القواعد والأدلة المحسوبة. القرار للمدير.", "An explanation built from rules and calculated evidence. The decision is the manager's.")}>{tr("تحليل التطوير والخطة", "Development analysis and plan")} · {bi(e.name)}</PageTitle>
-      <FlowStepper step="analysis" />
+      <BackLink to={`${B}/${slug}`} label={tr("العودة إلى الملف", "Back to profile")} />
+      <PageTitle sub={tr("شرح مبني على القواعد والأدلة المحسوبة. القرار للمدير.", "An explanation built from rules and calculated evidence. The decision is the manager's.")}>
+        {tr("تحليل التطوير والخطة", "Development analysis and plan")}
+      </PageTitle>
+      <div className="mb-6">
+        <EmpPicker
+          employees={data.employees}
+          value={slug}
+          onChange={pickEmployee}
+          disabled={loadingAi || loadingStored}
+        />
+      </div>
       <DataNotice error={data.error} />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Btn disabled={loadingAi} onClick={() => void loadAi()}>
-          {loadingAi ? tr("جارٍ التوليد…", "Generating…") : analysis ? tr("توليد / تحديث", "Generate / Refresh") : tr("توليد التحليل والخطة", "Generate analysis & plan")}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <Btn disabled={loadingAi || loadingStored} onClick={() => void loadAi(true)}>
+          {loadingAi
+            ? tr("جارٍ التوليد…", "Generating…")
+            : hasAi
+              ? tr("تحديث التحليل", "Update analysis")
+              : tr("توليد التحليل والخطة", "Generate analysis & plan")}
         </Btn>
-        <span className="rounded-full border border-dashed border-i500 px-3 py-1 text-[13px] font-bold text-i500">
-          {tr("مولَّد بالذكاء الاصطناعي · القرار للإنسان", "AI-generated · a human decides")}
-        </span>
-        {savedNote && (
-          <span className="rounded-full bg-mist px-3 py-1 text-[13px] font-bold text-i700">
-            {tr("نتيجة محفوظة", "Saved result")}
-          </span>
+        {hasAi && (
+          <Btn kind="outline" disabled={loadingAi || loadingStored} onClick={() => setOpen(true)}>
+            {tr("اعتماد المسار", "Approve path")}
+          </Btn>
         )}
-        {aiMeta && <span className="text-[12px] text-i500">{aiMeta}</span>}
       </div>
-      {loadingAi && !analysis && (
+
+      <Dialog open={open} onClose={() => setOpen(false)}>
+        <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("تأكيد القرار", "Confirm decision")}</h2>
+        <p className="m-0 mb-6 text-base leading-[1.7] text-i700">
+          {tr(
+            `ستعتمد أنت مسار «التطوير أولاً ثم إعادة التقييم» لـ ${name}. هذا القرار قرارك.`,
+            `You are approving the path "develop first, then re-evaluate" for ${name}. This is your decision.`,
+          )}
+        </p>
+        <div className="flex gap-2"><Btn onClick={() => { setApproved(true); setOpen(false) }}>{tr("اعتماد", "Approve")}</Btn><Btn kind="outline" onClick={() => setOpen(false)}>{tr("إلغاء", "Cancel")}</Btn></div>
+      </Dialog>
+
+      {(loadingAi || loadingStored) && !hasAi && (
         <div className="mb-6 flex flex-col gap-2" role="status">
-          <Skeleton className="h-24" /><Skeleton className="h-40" />
+          <Skeleton className="h-24" /><Skeleton className="h-32" />
         </div>
       )}
       {aiError && (
         <Card className="mb-4 border-crit p-4 text-base leading-[1.7] text-ink" role="alert">
-          <p className="m-0 mb-2 font-bold">{tr("تعذّر تحميل التحليل من الخادم", "Could not load analysis from the server")}</p>
+          <p className="m-0 mb-2 font-bold">{tr("تعذّر التوليد", "Could not generate")}</p>
           <p className="m-0">{aiError}</p>
-          <p className="m-0 mt-2 text-sm text-i700">{tr("الأقسام أدناه مبنية على محرك الجاهزية المحسوب — يمكنك متابعة العرض.", "Sections below use the calculated readiness engine — you can continue the demo.")}</p>
         </Card>
       )}
-      {!loadingAi && !analysis && !aiError && (
-        <DataNotice empty emptyHint={tr("اضغط «توليد التحليل والخطة» لطلب الشرح من الخادم. الأقسام أدناه جاهزة من محرك الجاهزية.", "Press “Generate analysis & plan” to request the server explanation. Sections below already use the readiness engine.")} />
+      {!loadingAi && !loadingStored && !hasAi && !aiError && (
+        <Card className="mb-6 border-dashed p-8 text-center">
+          <p className="m-0 text-lg font-bold text-ink">{tr("لم يُنشأ تحليل بعد", "No analysis yet")}</p>
+          <p className="m-0 mt-2 text-base leading-[1.7] text-i700">
+            {tr("اضغط «توليد التحليل والخطة» لبناء الشرح والخطة. بعد التوليد تُحفظ النتيجة وتعود عند العودة لهذه الصفحة.", "Press “Generate analysis & plan” to build the explanation and plan. After generating, the result is saved and returns when you come back to this page.")}
+          </p>
+        </Card>
       )}
-      {typeof analysis?.summary === "string" && analysis.summary && (
-        <p className="mb-6 max-w-[820px] text-base leading-[1.7] text-i900">{analysis.summary}</p>
-      )}
-      {analysis?.caution && <p className="mb-6 text-sm leading-[1.7] text-i500">{analysis.caution}</p>}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        <Card className="p-6">
-          <div className="mb-2 text-sm font-bold text-flow">{tr("نقاط القوة", "Strengths")}</div>
-          <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
-            {strengths.map((s, i) => (
-              <li key={`${s.behavior_key}-${i}`}>
-                {data.behaviors[s.behavior_key as BId] ? bi(data.behaviors[s.behavior_key as BId].name) : s.behavior_key}
-                {s.evidence ? <span className="text-i500"> — {s.evidence}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </Card>
-        <Card className="p-6">
-          <div className="mb-2 text-sm font-bold text-i500">{tr("مجالات التطوير", "Development areas")}</div>
-          <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
-            {gaps.map((g, i) => {
-              const part = m.parts.find((p) => p.id === g.behavior_key)
+      {hasAi && analysis && (
+        <>
+          {typeof analysis.summary === "string" && analysis.summary && (
+            <Card className="mb-4 p-6">
+              <p className="m-0 max-w-[820px] text-base leading-[1.7] text-i900">{analysis.summary}</p>
+              {analysis.caution && <p className="m-0 mt-3 text-sm leading-[1.7] text-i500">{analysis.caution}</p>}
+            </Card>
+          )}
+
+          <ExpandSection
+            open
+            title={tr("نقاط القوة ومجالات التطوير", "Strengths & development areas")}
+            summary={tr(
+              `${aiStrengths.length} قوة · ${aiGaps.length} مجال تطوير · ${aiBlind.length} نقطة عمياء`,
+              `${aiStrengths.length} strengths · ${aiGaps.length} development areas · ${aiBlind.length} blind spots`,
+            )}
+          >
+            <div className="grid gap-5 md:grid-cols-3">
+              <div>
+                <div className="mb-2 text-sm font-bold text-flow">{tr("نقاط القوة", "Strengths")}</div>
+                {aiStrengths.length === 0 ? <p className="m-0 text-base text-i500">—</p> : (
+                  <ul className="m-0 list-disc ps-5 text-base leading-[1.8] text-i900">
+                    {aiStrengths.map((s, i) => (
+                      <li key={`${s.behavior_key}-${i}`}>
+                        {data.behaviors[s.behavior_key as BId] ? bi(data.behaviors[s.behavior_key as BId].name) : s.behavior_key}
+                        {s.evidence ? <span className="text-i500"> — {s.evidence}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-bold text-i500">{tr("مجالات التطوير", "Development areas")}</div>
+                {aiGaps.length === 0 ? <p className="m-0 text-base text-i500">—</p> : (
+                  <ul className="m-0 list-disc ps-5 text-base leading-[1.8] text-i900">
+                    {aiGaps.map((g, i) => (
+                      <li key={`${g.behavior_key}-${i}`}>
+                        {data.behaviors[g.behavior_key as BId] ? bi(data.behaviors[g.behavior_key as BId].name) : g.behavior_key}
+                        {"why_it_matters" in g && g.why_it_matters ? <span className="text-i500"> — {g.why_it_matters}</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="mb-2 text-sm font-bold text-i500">{tr("النقاط العمياء", "Blind spots")}</div>
+                {aiBlind.length === 0 ? <p className="m-0 text-base text-i500">—</p> : aiBlind.map((b, i) => (
+                  <p key={`${b.behavior_key}-${i}`} className="m-0 mb-2 text-base leading-[1.7] text-i900">
+                    {b.explanation
+                      || (data.behaviors[b.behavior_key as BId]
+                        ? bi(data.behaviors[b.behavior_key as BId].name)
+                        : b.behavior_key)}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </ExpandSection>
+
+          {(missingEvidence.length > 0 || evidenceFor.length > 0 || evidenceAgainst.length > 0) && (
+            <ExpandSection title={tr("الأدلة وما ينقص الملف", "Evidence & what’s missing")}>
+              {missingEvidence.length > 0 && (
+                <>
+                  <div className="mb-2 text-sm font-bold text-i500">{tr("ما الذي سيقوّي الملف؟", "What would strengthen the case?")}</div>
+                  <ul className="m-0 mb-4 list-disc ps-5 text-base leading-[1.8] text-i900">
+                    {missingEvidence.map((line, i) => <li key={i}>{line}</li>)}
+                  </ul>
+                </>
+              )}
+              {(evidenceFor.length > 0 || evidenceAgainst.length > 0) && (
+                <div className="grid gap-4 text-sm leading-[1.7] text-i700 md:grid-cols-2">
+                  {evidenceFor.length > 0 && (
+                    <div>
+                      <div className="font-bold text-i500">{tr("أدلة مع الإشارة", "Evidence for")}</div>
+                      <ul className="m-0 list-disc ps-5">{evidenceFor.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                    </div>
+                  )}
+                  {evidenceAgainst.length > 0 && (
+                    <div>
+                      <div className="font-bold text-i500">{tr("أدلة ضد الإشارة", "Evidence against")}</div>
+                      <ul className="m-0 list-disc ps-5">{evidenceAgainst.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </ExpandSection>
+          )}
+
+          {pathOptions.length > 0 && (
+            <ExpandSection
+              open
+              title={tr("المسار المقترح", "Suggested path")}
+              summary={pathOptions[0]?.option}
+            >
+              <div className="grid gap-4 md:grid-cols-3">
+                {pathOptions.map((opt, i) => {
+                  const recommended = opt.option === (analysis.readiness_view?.signal ?? m.signal) || i === 0
+                  return (
+                    <div key={i} className={`flex flex-col gap-2 rounded-[12px] p-4 ${recommended ? "bg-mist" : "bg-white"}`}>
+                      <b className="text-lg text-ink">{opt.option}</b>
+                      <span className="text-[13px] font-bold text-i500">
+                        {recommended ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}
+                      </span>
+                      <p className="m-0 text-base leading-[1.7] text-i700">{opt.rationale}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </ExpandSection>
+          )}
+
+          {planItems.length > 0 && (
+            <ExpandSection
+              title={tr("خطة التطوير", "Development plan")}
+              summary={tr(`${planItems.length} خطوات`, `${planItems.length} steps`)}
+            >
+              <ol className="m-0 flex list-none flex-col gap-3 p-0">
+                {planItems.map((item, i) => (
+                  <li key={i} className="flex flex-wrap items-start gap-3 rounded-[12px] bg-mist p-4">
+                    <span className="grid size-7 place-items-center rounded-full bg-ink font-num text-sm font-extrabold text-white">{i + 1}</span>
+                    <div className="min-w-[200px] flex-1">
+                      <b className="text-base text-ink">{item.title}</b>
+                      <div className="text-sm text-i500">{item.duration_weeks} {tr("أسابيع", "weeks")} · {item.type}</div>
+                      <p className="m-0 mt-1 text-sm leading-[1.6] text-i700">{item.description}</p>
+                      <p className="m-0 mt-1 text-sm leading-[1.6] text-i500">{tr("دليل النجاح", "Success evidence")}: {item.success_evidence}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </ExpandSection>
+          )}
+
+          <ExpandSection title={tr("ماذا لو؟", "What if?")} summary={tr("مشروع صغير أولاً", "Small project first")}>
+            <p className="m-0 mb-4 text-base font-bold text-ink">{tr("ماذا لو قاد أحمد مشروعاً صغيراً أولاً؟", "What if Ahmad leads a small project first?")}</p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="text-sm text-i500">{tr("الآن", "Now")}</div>
+                <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m.rounded}%</div>
+                <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart?.cur ?? null, delegPart?.level ?? null)} /></div>
+              </div>
+              <div>
+                <div className="text-sm text-i500">{tr("افتراضياً بعد المشروع", "Hypothetically after the project")}</div>
+                <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m2.rounded}%</div>
+                <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart2?.cur ?? null, delegPart2?.level ?? null)} /></div>
+              </div>
+            </div>
+            <p className="m-0 mt-4 text-sm leading-[1.7] text-i500">{tr("افتراض: يتحقق فقط إذا أظهرت تقييمات المدير والزملاء بعد المشروع مستوى 75 في التفويض. لا يُحفظ ولا يغيّر الدرجات الحالية.", "Assumption: it only holds if the manager's and peers' ratings after the project show level 75 in delegation. It isn't saved and doesn't change current scores.")}</p>
+          </ExpandSection>
+        </>
+      )}
+    </>
+  )
+}
+
+type EmpOption = { slug: string; name: { ar: string; en: string }; role: { ar: string; en: string } }
+
+/** Custom employee picker — native <select> clips RTL labels. */
+function EmpPicker({
+  employees,
+  value,
+  onChange,
+  disabled,
+}: {
+  employees: EmpOption[]
+  value: string
+  onChange: (slug: string) => void
+  disabled?: boolean
+}) {
+  const { tr, bi } = useApp()
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const selected = employees.find((e) => e.slug === value) ?? employees[0]
+
+  useEffect(() => {
+    if (!open) return
+    const close = (ev: MouseEvent) => {
+      if (!root.current?.contains(ev.target as Node)) setOpen(false)
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("mousedown", close)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", close)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
+
+  if (!selected) return null
+
+  return (
+    <div ref={root} className="w-full">
+      <div className="mb-2 text-sm font-bold text-i500">{tr("الموظف", "Employee")}</div>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 rounded-[12px] border border-i100 bg-white px-4 py-3 text-start hover:border-flow disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-xl font-bold text-ink">{bi(selected.name)}</span>
+            <span className="text-base text-i500">{bi(selected.role)}</span>
+          </span>
+        </span>
+        <ChevronDown
+          size={20}
+          className={`shrink-0 text-flow transition-transform duration-300 ease-out ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
+      </button>
+      <div
+        className={`expand-panel grid transition-[grid-template-rows,opacity] duration-300 ease-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <ul
+            role="listbox"
+            aria-label={tr("اختر موظفاً", "Choose an employee")}
+            className="mt-2 max-h-[240px] overflow-y-auto rounded-[12px] border border-i100 bg-white py-1 shadow-[0_8px_24px_rgba(7,59,46,0.08)]"
+          >
+            {employees.map((e, i) => {
+              const on = e.slug === value
               return (
-                <li key={`${g.behavior_key}-${i}`}>
-                  {data.behaviors[g.behavior_key as BId] ? bi(data.behaviors[g.behavior_key as BId].name) : g.behavior_key}
-                  {part && <span className="font-num text-sm text-i500"> ({part.cur} → {part.required})</span>}
-                  {"why_it_matters" in g && g.why_it_matters ? <span className="text-i500"> — {g.why_it_matters}</span> : null}
+                <li key={e.slug} className="emp-opt" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    disabled={disabled}
+                    onClick={() => {
+                      onChange(e.slug)
+                      setOpen(false)
+                    }}
+                    className={`flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 border-0 px-4 py-3 text-start transition-colors ${on ? "bg-mist" : "bg-transparent hover:bg-mist/70"}`}
+                  >
+                    <span className={`text-base font-bold ${on ? "text-flow" : "text-ink"}`}>{bi(e.name)}</span>
+                    <span className="text-sm text-i500">{bi(e.role)}</span>
+                  </button>
                 </li>
               )
             })}
           </ul>
-        </Card>
-        <Card className="p-6">
-          <div className="mb-2 text-sm font-bold text-i500">{tr("النقاط العمياء", "Blind spots")}</div>
-          {blind.length === 0 && <p className="m-0 text-base text-i500">—</p>}
-          {blind.map((b, i) => (
-            <p key={`${b.behavior_key}-${i}`} className="m-0 text-base leading-[1.7] text-i900">
-              {b.explanation
-                || (() => {
-                  const key = b.behavior_key as BId
-                  const beh = data.behaviors[key]
-                  const r = e.ratings[key]
-                  if (!beh || !r) return b.behavior_key
-                  return tr(
-                    `«${bi(beh.name)}»: يرى أحمد نفسه عند ${r.self ?? "—"}، بينما يراه المدير والزملاء عند ${r.manager ?? "—"} و${r.peer ?? "—"}.`,
-                    `"${bi(beh.name)}": Ahmed sees himself at ${r.self ?? "—"}, while his manager and peers see him at ${r.manager ?? "—"} and ${r.peer ?? "—"}.`,
-                  )
-                })()}
-            </p>
-          ))}
-        </Card>
-      </div>
-
-      <Card className="mb-6 p-6">
-        <div className="mb-2 text-sm font-bold text-i500">{tr("ما الذي سيقوّي الملف؟", "What would strengthen the case?")}</div>
-        <ul className="m-0 list-disc ps-6 text-base leading-[1.8] text-i900">
-          {(missingEvidence.length
-            ? missingEvidence
-            : [
-                tr("تقييم من الزملاء لمعالجة الخلافات، فهو غير متوفر حالياً.", "A peer rating for conflict handling, which is missing today."),
-                tr("أدلة جديدة على التفويض بعد مشروع صغير يقوده بنفسه.", "New evidence of delegation after a small project he leads himself."),
-              ]
-          ).map((line, i) => <li key={i}>{line}</li>)}
-        </ul>
-        {analysis?.readiness_view && (
-          <div className="mt-4 grid gap-3 text-sm leading-[1.7] text-i700 md:grid-cols-2">
-            <div>
-              <div className="font-bold text-i500">{tr("أدلة مع الإشارة", "Evidence for")}</div>
-              <ul className="m-0 list-disc ps-5">{asArray<string>(analysis.readiness_view.evidence_for).map((x, i) => <li key={i}>{x}</li>)}</ul>
-            </div>
-            <div>
-              <div className="font-bold text-i500">{tr("أدلة ضد الإشارة", "Evidence against")}</div>
-              <ul className="m-0 list-disc ps-5">{asArray<string>(analysis.readiness_view.evidence_against).map((x, i) => <li key={i}>{x}</li>)}</ul>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("المسار المقترح", "Suggested path")}</h2>
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
-        {(pathOptions.length
-          ? pathOptions.map((opt, i) => {
-              const recommended = opt.option === (analysis?.readiness_view?.signal ?? m.signal) || i === 0
-              return (
-                <Card key={i} className={`flex flex-col gap-3 p-6 ${recommended ? "border-2 border-flow" : ""}`}>
-                  <b className="text-xl text-ink">{opt.option}</b>
-                  <span className={`self-start rounded-full px-3 py-1 text-[13px] font-bold ${recommended ? "bg-flow text-white" : "bg-i100 text-i700"}`}>
-                    {recommended ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}
-                  </span>
-                  <p className="m-0 text-base leading-[1.7] text-i700">{opt.rationale}</p>
-                </Card>
-              )
-            })
-          : ([["now", tr("الأدلة لا تدعم ذلك بعد: التفويض حرج وهو دون المطلوب.", "The evidence doesn't support it yet: delegation is critical and below the requirement.")], ["develop", tr("الملاءمة مرتفعة وفجوتان قابلتان للإغلاق خلال ثلاثة أشهر.", "High fit and two gaps that can be closed within three months.")], ["specialist", tr("خيار مناسب إذا فضّل أحمد التخصص التقني.", "A fit if Ahmad prefers to stay technical.")]] as const).map(([k, why]) => (
-              <Card key={k} className={`flex flex-col gap-3 p-6 ${k === "develop" ? "border-2 border-flow" : ""}`}>
-                <b className="text-xl text-ink">{bi(PATH_NAME[k])}</b>
-                <span className={`self-start rounded-full px-3 py-1 text-[13px] font-bold ${k === "develop" ? "bg-flow text-white" : "bg-i100 text-i700"}`}>{k === "develop" ? tr("التوصية", "Recommended") : tr("بديل", "Alternative")}</span>
-                <p className="m-0 text-base leading-[1.7] text-i700">{why}</p>
-              </Card>
-            ))
-        )}
-      </div>
-
-      {planItems.length ? (
-        <>
-          <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("خطة التطوير", "Development plan")}</h2>
-          <ol className="m-0 mb-6 flex list-none flex-col gap-4 p-0">
-            {planItems.map((item, i) => (
-              <li key={i}>
-                <Card className="flex flex-wrap items-center gap-4 p-6">
-                  <span className="grid size-8 place-items-center rounded-full bg-ink font-num font-extrabold text-white">{i + 1}</span>
-                  <div className="min-w-[200px] flex-1">
-                    <b className="text-base text-ink">{item.title}</b>
-                    <div className="text-sm text-i500">{item.duration_weeks} {tr("أسابيع", "weeks")} · {item.type}</div>
-                    <p className="m-0 mt-1 text-sm leading-[1.6] text-i700">{item.description}</p>
-                    <p className="m-0 mt-1 text-sm leading-[1.6] text-i500">{tr("دليل النجاح", "Success evidence")}: {item.success_evidence}</p>
-                  </div>
-                </Card>
-              </li>
-            ))}
-          </ol>
-        </>
-      ) : null}
-
-      <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("ماذا لو؟", "What if?")}</h2>
-      <Card className="mb-6 flex flex-col gap-4 p-6">
-        <p className="m-0 text-base font-bold text-ink">{tr("ماذا لو قاد أحمد مشروعاً صغيراً أولاً؟", "What if Ahmad leads a small project first?")}</p>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <div className="text-sm text-i500">{tr("الآن", "Now")}</div>
-            <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m.rounded}%</div>
-            <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart?.cur ?? null, delegPart?.level ?? null)} /></div>
-          </div>
-          <div>
-            <div className="text-sm text-i500">{tr("افتراضياً بعد المشروع", "Hypothetically after the project")}</div>
-            <div className="font-num text-[40px] font-extrabold leading-none text-ink">{m2.rounded}%</div>
-            <div className="mt-1 text-sm text-i700">{tr("التفويض", "Delegation")}: <LevelLabel level={displayLevel(delegPart2?.cur ?? null, delegPart2?.level ?? null)} /></div>
-          </div>
         </div>
-        <p className="m-0 text-sm leading-[1.7] text-i500">{tr("افتراض: يتحقق فقط إذا أظهرت تقييمات المدير والزملاء بعد المشروع مستوى 75 في التفويض. لا يُحفظ ولا يغيّر الدرجات الحالية.", "Assumption: it only holds if the manager's and peers' ratings after the project show level 75 in delegation. It isn't saved and doesn't change current scores.")}</p>
-      </Card>
-
-      <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("تكلفة الترقية الفاشلة مقابل خطة التطوير", "Cost of a failed promotion vs. a development plan")}</h2>
-      <Card className="mb-6 flex flex-col gap-4 p-6">
-        <div className="flex flex-wrap items-end gap-6">
-          <label className="flex flex-col gap-1 text-sm font-bold text-i500">{tr("تكلفة ترقية فاشلة (ريال)", "Failed promotion (SAR)")}<input type="number" className={input} value={cost} onChange={(ev) => setCost(+ev.target.value)} /></label>
-          <label className="flex flex-col gap-1 text-sm font-bold text-i500">{tr("تكلفة خطة التطوير (ريال)", "Development plan (SAR)")}<input type="number" className={input} value={planCost} onChange={(ev) => setPlanCost(+ev.target.value)} /></label>
-          <div><div className="text-sm text-i500">{tr("الفرق", "Difference")}</div><div className="font-num text-[40px] font-extrabold leading-none text-ink">{n(Math.max(cost - planCost, 0))} <span className="text-base font-bold text-i500">{tr("ريال", "SAR")}</span></div></div>
-        </div>
-        <p className="m-0 text-sm leading-[1.7] text-i500">{tr(`تقدير بافتراضات قابلة للتعديل: توظيف بديل ${n(P.replacementHiring)}، وتراجع إنتاجية الفريق ${n(P.productivityLoss)}، ومغادرة أعضاء من الفريق ${n(P.teamTurnover)}.`, `An estimate with editable assumptions: replacement hiring ${n(P.replacementHiring)}, team productivity loss ${n(P.productivityLoss)}, team members leaving ${n(P.teamTurnover)}.`)}</p>
-      </Card>
-
-      <Btn onClick={() => setOpen(true)}>{tr("اعتماد المسار", "Approve path")}</Btn>
-      <Dialog open={open} onClose={() => setOpen(false)}>
-        <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("تأكيد القرار", "Confirm decision")}</h2>
-        <p className="m-0 mb-6 text-base leading-[1.7] text-i700">{tr("ستعتمد أنت مسار «التطوير أولاً ثم إعادة التقييم» لأحمد. هذا القرار قرارك.", "You are approving the path \"develop first, then re-evaluate\" for Ahmad. This is your decision.")}</p>
-        <div className="flex gap-2"><Btn onClick={() => { setDone(true); setOpen(false) }}>{tr("اعتماد", "Approve")}</Btn><Btn kind="outline" onClick={() => setOpen(false)}>{tr("إلغاء", "Cancel")}</Btn></div>
-      </Dialog>
-    </>
+      </div>
+    </div>
   )
 }
 
@@ -644,23 +836,36 @@ export function RateForm() {
   const { tr, bi, lang } = useApp()
   const data = useBehaviorData()
   const nav = useNavigate()
-  const [rater, setRater] = useState<Rater>("manager")
+  const rater: Rater = "manager"
+  const [empSlug, setEmpSlug] = useState("ahmad")
   const [bid, setBid] = useState<BId>("delegation")
   const [level, setLevel] = useState(50)
   const [example, setExample] = useState("")
   const [error, setError] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [text, setText] = useState(lang === "ar" ? SAMPLE_AR : SAMPLE_EN)
+  const [text, setText] = useState("")
   const [phase, setPhase] = useState<"idle" | "loading" | "done" | "error">("idle")
   const [found, setFound] = useState<AiProposal[]>([])
   const [aiError, setAiError] = useState<string | null>(null)
   const [confirmAllBusy, setConfirmAllBusy] = useState(false)
   const [allConfirmed, setAllConfirmed] = useState(false)
   const chip = (on: boolean) => `rounded-full border px-3 py-2 text-sm font-bold ${on ? "border-flow bg-flow text-white" : "border-i100 bg-white text-i700"}`
+  const sample = lang === "ar" ? SAMPLE_AR : SAMPLE_EN
 
-  const employee = data.emp("ahmad")
+  const employee = data.emp(empSlug)
   const pending = found.filter((f) => f.ok === null)
-  const step: FlowStep = phase === "done" || found.length > 0 ? "review" : "feedback"
+  const reviewReady = found.length > 0
+  const fullyConfirmed = allConfirmed && found.length > 0 && found.every((f) => f.ok === true)
+
+  const pickEmployee = (slug: string) => {
+    if (slug === empSlug) return
+    setEmpSlug(slug)
+    setFound([])
+    setAllConfirmed(false)
+    setPhase("idle")
+    setAiError(null)
+    setSaved(false)
+  }
 
   const submitManual = async () => {
     if (!example.trim()) return setError(true)
@@ -738,7 +943,7 @@ export function RateForm() {
 
     const result = await postJson<{
       saved: { id: string; behavior_key: string; level: number; quote: string; rationale: string }[]
-      dropped: { reason: string }[]
+      dropped: { reason: string; behavior_key?: string }[]
     }>("/api/interpret-feedback", { submission_id: sub.id }, { timeoutMs: INTERPRET_CLIENT_TIMEOUT_MS })
 
     if (!result.ok) {
@@ -746,8 +951,8 @@ export function RateForm() {
       setAiError(
         timedOut
           ? tr(
-            "استغرق التفسير أكثر من 35 ثانية. أضف تقييماً يدوياً بالمثال أدناه، أو أعد المحاولة لاحقاً.",
-            "Interpretation took longer than 35 seconds. Add a manual rating with an example below, or try again later.",
+            "استغرق التفسير أكثر من المتوقع. أضف تقييماً يدوياً بالمثال أدناه، أو أعد المحاولة لاحقاً.",
+            "Interpretation took longer than expected. Add a manual rating with an example below, or try again later.",
           )
           : describeApiError(result.error, tr),
       )
@@ -765,6 +970,12 @@ export function RateForm() {
         ok: null,
       })),
     )
+    if (result.data.saved.length === 0 && (result.data.dropped?.length ?? 0) > 0) {
+      setAiError(tr(
+        "وُجدت إشارات في النص لكن لم تُقبل بعد التحقق (مفتاح سلوك أو اقتباس غير مطابق). جرّب النص التجريبي أو صغ أمثلة أقرب للنص.",
+        "Signals were found but none passed validation (behavior key or quote mismatch). Try the sample text or keep quotes closer to the source.",
+      ))
+    }
     setPhase("done")
   }
 
@@ -803,7 +1014,6 @@ export function RateForm() {
     return (
       <>
         <PageTitle>{tr("جمع الملاحظات", "Collect feedback")}</PageTitle>
-        <FlowStepper step="feedback" />
         <Skeleton className="mb-4 h-32" /><Skeleton className="h-48" />
       </>
     )
@@ -814,105 +1024,199 @@ export function RateForm() {
       <PageTitle sub={tr("كل تقييم يحتاج مثالاً ملموساً. لا نستنتج السلوك من البريد أو المحادثات.", "Every rating needs a concrete example. We never infer behavior from emails or chats.")}>
         {tr("جمع الملاحظات", "Collect feedback")}
       </PageTitle>
-      <FlowStepper step={step} />
       <DataNotice error={data.error} />
 
       <Card className="mb-6 flex flex-col gap-5 p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-i100 pb-4">
-          <div>
-            <div className="text-sm font-bold text-i500">{tr("الموظف", "Employee")}</div>
-            <div className="mt-1 text-lg font-bold text-ink">{bi(employee.name)}</div>
-            <div className="text-sm text-i500">{bi(employee.role)}</div>
-          </div>
-          <div className="min-w-[200px]">
-            <div className="mb-2 text-sm font-bold text-i500">{tr("نوع المقيِّم", "Rater type")}</div>
-            <div className="flex flex-wrap gap-2">{(["manager", "peer", "self"] as Rater[]).map((k) => <button key={k} type="button" className={chip(rater === k)} onClick={() => setRater(k)}>{bi(RATER_NAME[k])}</button>)}</div>
+        <div className="border-b border-i100 pb-4">
+          <EmpPicker
+            employees={data.employees}
+            value={employee.slug}
+            onChange={pickEmployee}
+            disabled={phase === "loading" || confirmAllBusy}
+          />
+        </div>
+
+        <div>
+          <h2 className="m-0 mb-3 text-lg font-bold text-ink">{tr("ملاحظات نصية", "Free-text feedback")}</h2>
+          {reviewReady ? (
+            <div
+              className="box-border h-[160px] w-full min-w-0 overflow-y-auto rounded-[12px] border border-i100 bg-mist p-3 text-base leading-[1.7] text-i900"
+              aria-label={tr("الملاحظات مع تمييز الأدلة", "Feedback with evidence highlights")}
+            >
+              <MultiHighlight text={text} quotes={found.map((f) => f.quote)} />
+            </div>
+          ) : (
+            <textarea
+              value={text}
+              onChange={(ev) => setText(ev.target.value)}
+              rows={6}
+              placeholder={tr(
+                "الصق ملاحظات المشروع هنا: مواقف ملموسة عن التفويض، الملاحظات، المسؤولية، أو حل الخلافات…",
+                "Paste project feedback here: concrete situations about delegation, coaching, ownership, or conflict handling…",
+              )}
+              className="box-border h-[160px] w-full min-w-0 resize-none overflow-y-auto rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900 placeholder:text-i500"
+              aria-label={tr("ملاحظات المشروع", "Project feedback")}
+            />
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Btn disabled={phase === "loading"} onClick={() => void analyze()}>
+              {phase === "loading"
+                ? tr("جارٍ التفسير…", "Interpreting…")
+                : reviewReady
+                  ? tr("إعادة الاقتراح من النص", "Suggest again from text")
+                  : tr("اقترح تقييمات من النص", "Suggest ratings from the text")}
+            </Btn>
+            {!text.trim() && !reviewReady && (
+              <Btn kind="outline" disabled={phase === "loading"} onClick={() => setText(sample)}>
+                {tr("استخدم نصاً تجريبياً", "Use sample text")}
+              </Btn>
+            )}
+            {reviewReady && (
+              <Btn
+                kind="outline"
+                disabled={phase === "loading"}
+                onClick={() => {
+                  setFound([])
+                  setAllConfirmed(false)
+                  setPhase("idle")
+                  setAiError(null)
+                }}
+              >
+                {tr("تعديل النص", "Edit text")}
+              </Btn>
+            )}
           </div>
         </div>
 
-        <div className="flex w-full min-w-0 flex-col gap-4">
-          <h2 className="m-0 text-lg font-bold text-ink">{tr("قراءة الملاحظات النصية", "Reading free-text feedback")}</h2>
-        <textarea value={text} onChange={(ev) => setText(ev.target.value)} rows={5} className="box-border w-full min-w-0 rounded-[12px] border border-i100 bg-white p-3 text-base leading-[1.7] text-i900" aria-label={tr("ملاحظات المشروع", "Project feedback")} />
-        <Btn className="self-start" disabled={phase === "loading"} onClick={() => void analyze()}>{tr("اقترح تقييمات من النص", "Suggest ratings from the text")}</Btn>
         {phase === "loading" && (
           <div className="flex flex-col gap-2" role="status" aria-live="polite">
-            <b>{tr("جارٍ تفسير النص… (قد يستغرق حتى 35 ثانية)", "Interpreting feedback… (may take up to 35 seconds)")}</b>
+            <p className="m-0 text-sm text-i700">{tr("قد يستغرق حتى دقيقة", "May take up to a minute")}</p>
             <Skeleton className="h-12" /><Skeleton className="h-12" /><Skeleton className="h-12" />
           </div>
         )}
+
         {aiError && (
           <div role="alert" className="rounded-[12px] border border-i100 bg-mist p-4 text-sm leading-[1.7] text-i900">
             <p className="m-0 mb-2">{aiError}</p>
-            <p className="m-0 text-i500">{tr("البديل: استخدم نموذج التقييم اليدوي أدناه بمثال ملموس.", "Fallback: use the manual rating form below with a concrete example.")}</p>
+            <p className="m-0 text-i500">{tr("البديل: استخدم التقييم اليدوي أدناه.", "Fallback: use the manual rating below.")}</p>
           </div>
         )}
+
         {phase === "done" && found.length === 0 && !aiError && (
           <p className="m-0 text-base text-i700">{tr("لم نجد أدلة كافية قابلة للتحقق في هذا النص.", "We found no verifiable evidence in this text.")}</p>
         )}
-        {found.length > 0 && pending.length > 0 && (
-          <Btn className="self-start" disabled={confirmAllBusy} onClick={() => void confirmAll()}>
-            {confirmAllBusy ? tr("جارٍ التأكيد…", "Confirming…") : tr("تأكيد الكل", "Confirm all")}
-          </Btn>
-        )}
-        {allConfirmed && found.length > 0 && found.every((f) => f.ok === true) && (
-          <div role="status">
-            <Card className="border-flow bg-mist p-4">
-              <p className="m-0 text-base font-bold text-ink">{tr("تم تأكيد الاقتراحات وتحديث الملف.", "Suggestions confirmed and the profile was updated.")}</p>
-              <button type="button" className="mt-2 border-0 bg-transparent p-0 text-sm font-bold text-flow underline" onClick={() => nav("/app/behavior/ahmad")}>
-                {tr("عرض الملف المحدَّث", "View updated profile")}
-              </button>
-            </Card>
-          </div>
-        )}
-        {found.map((f, i) => {
-          const rub = rubricLine(data.behaviors[f.behavior_key]?.rubric, f.level, lang)
-          return (
-            <div key={f.id} className="flex flex-col gap-2 rounded-[12px] bg-mist p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <b className="text-base text-ink">{bi(data.behaviors[f.behavior_key]?.name ?? { ar: f.behavior_key, en: f.behavior_key })}</b>
-                <span className="text-sm text-i700">{tr("المستوى المقترح", "Suggested level")}: <LevelLabel level={f.level} /></span>
-                <AiTag confirmed={f.ok === true} />
-              </div>
-              <div className="rounded-[12px] border border-i100 bg-white p-3 text-sm leading-[1.7] text-i900">
-                <HighlightedText text={text} quote={f.quote} />
-              </div>
-              {rub && (
-                <p className="m-0 text-sm leading-[1.7] text-i700">
-                  <span className="font-bold text-i500">{tr("مرساة المستوى", "Level rubric")}: </span>
-                  {rub}
-                </p>
-              )}
-              {f.rationale && <p className="m-0 text-sm leading-[1.7] text-i700">{f.rationale}</p>}
-              {f.ok === null ? (
-                <div className="flex flex-wrap gap-2">
-                  <Btn className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "confirm")}>{tr("تأكيد", "Confirm")}</Btn>
-                  <Btn kind="outline" className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "reject")}>{tr("رفض", "Reject")}</Btn>
-                </div>
-              ) : (
-                <span className="text-sm font-bold text-flow">{tr("أُضيف إلى الملف بعد التأكيد", "Added to the profile after confirmation")}</span>
-              )}
-            </div>
-          )
-        })}
-          <p className="m-0 text-sm leading-[1.7] text-i500">{tr("الاقتراحات تبقى «بانتظار التأكيد» حتى يراجعها شخص. الدرجات تأتي من قواعد معلنة، ولا يخترع النظام رقماً.", "Suggestions stay \"awaiting confirmation\" until a person reviews them. Scores come from declared rules; the system never invents a number.")}</p>
-        </div>
-
-        <details className="rounded-[12px] border border-i100 bg-mist/50 p-4">
-          <summary className="cursor-pointer text-sm font-bold text-i700">{tr("تقييم يدوي (احتياطي)", "Manual rating (fallback)")}</summary>
-          <div className="mt-4 flex flex-col gap-4">
-            <div className="text-sm font-bold text-i500">{tr("السلوك", "Behavior")}</div>
-            <div className="flex flex-wrap gap-2">{data.roleReqs.map((q) => <button key={q.id} type="button" className={chip(bid === q.id)} onClick={() => setBid(q.id)}>{bi(data.behaviors[q.id].name)}</button>)}</div>
-            <div className="text-sm font-bold text-i500">{tr("المستوى", "Level")}</div>
-            <div className="flex overflow-hidden self-start rounded-[12px] border border-i100">{[25, 50, 75, 100].map((l) => <button key={l} type="button" onClick={() => setLevel(l)} className={`border-0 px-4 py-2 text-sm font-bold ${level === l ? "bg-ink text-white" : "bg-white text-i700"}`}><span className="font-num">{l}</span></button>)}</div>
-            <label className="flex flex-col gap-2 text-sm font-bold text-i500">{tr("مثال ملموس (مطلوب)", "A concrete example (required)")}
-              <textarea value={example} onChange={(ev) => setExample(ev.target.value)} rows={3} placeholder={tr("مثال: في اجتماع الأسبوع الماضي…", "For example: in last week's meeting…")} className="box-border w-full min-w-0 rounded-[12px] border border-i100 bg-white p-3 text-base font-normal text-i900" />
-            </label>
-            {error && <p role="alert" className="m-0 text-sm font-bold text-i900">{tr("أضف مثالاً ملموساً قبل الحفظ.", "Add a concrete example before saving.")}</p>}
-            {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم", "Rating saved")} />}
-            <Btn className="self-start" onClick={() => void submitManual()}>{tr("حفظ التقييم", "Save rating")}</Btn>
-          </div>
-        </details>
       </Card>
+
+      {reviewReady && (
+        <Card className="mb-6 flex flex-col gap-4 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-i100 pb-4">
+            <div>
+              <h2 className="m-0 text-lg font-bold text-ink">{tr("مراجعة الاقتراحات", "Review suggestions")}</h2>
+              <p className="m-0 mt-1 text-sm text-i500">
+                {fullyConfirmed
+                  ? tr("تم تأكيد الكل — الملف محدَّث.", "All confirmed — profile updated.")
+                  : tr(
+                    `${pending.length} بانتظار التأكيد من ${found.length}`,
+                    `${pending.length} awaiting confirmation of ${found.length}`,
+                  )}
+              </p>
+            </div>
+            {pending.length > 0 && (
+              <Btn disabled={confirmAllBusy} onClick={() => void confirmAll()}>
+                {confirmAllBusy ? tr("جارٍ التأكيد…", "Confirming…") : tr("تأكيد الكل", "Confirm all")}
+              </Btn>
+            )}
+          </div>
+
+          {fullyConfirmed && (
+            <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-flow bg-mist px-4 py-3">
+              <p className="m-0 text-base font-bold text-ink">{tr("تم تأكيد الاقتراحات وتحديث الملف.", "Suggestions confirmed and the profile was updated.")}</p>
+              <Btn className="px-4 py-2 text-sm" onClick={() => nav(`${B}/${employee.slug}`)}>
+                {tr("عرض الملف المحدَّث", "View updated profile")}
+              </Btn>
+            </div>
+          )}
+
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+            {found.map((f, i) => {
+              const rub = rubricLine(data.behaviors[f.behavior_key]?.rubric, f.level, lang)
+              const color = SUGGEST_COLORS[i % SUGGEST_COLORS.length]!
+              return (
+                <li
+                  key={f.id}
+                  className="rounded-[12px] border border-i100 bg-white p-4"
+                  style={{ borderInlineStartWidth: 4, borderInlineStartColor: color.edge }}
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ background: color.edge }} aria-hidden />
+                    <b className="text-base text-ink">{bi(data.behaviors[f.behavior_key]?.name ?? { ar: f.behavior_key, en: f.behavior_key })}</b>
+                    <span className="text-sm text-i700">{tr("المستوى", "Level")}: <LevelLabel level={f.level} /></span>
+                    <AiTag confirmed={f.ok === true} />
+                  </div>
+                  {f.quote && (
+                    <p className="m-0 mb-2 text-sm leading-[1.6] text-i700">
+                      <span className="font-bold text-i500">{tr("الدليل", "Evidence")}: </span>
+                      «{f.quote}»
+                    </p>
+                  )}
+                  {rub && (
+                    <p className="m-0 text-sm leading-[1.7] text-i700">
+                      <span className="font-bold text-i500">{tr("مرساة المستوى", "Level rubric")}: </span>
+                      {rub}
+                    </p>
+                  )}
+                  {f.rationale && <p className="m-0 mt-2 text-sm leading-[1.7] text-i700">{f.rationale}</p>}
+                  {f.ok === null ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Btn className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "confirm")}>{tr("تأكيد", "Confirm")}</Btn>
+                      <Btn kind="outline" className="px-4 py-2 text-sm" onClick={() => void confirmOrReject(f.id, "reject")}>{tr("رفض", "Reject")}</Btn>
+                    </div>
+                  ) : (
+                    <p className="m-0 mt-3 text-sm font-bold text-flow">{tr("أُضيف إلى الملف", "Added to the profile")}</p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+
+          {!fullyConfirmed && (
+            <p className="m-0 text-sm leading-[1.7] text-i500">
+              {tr(
+                "الاقتراحات لا تُحتسب حتى تؤكَّد. الدرجات من قواعد معلنة، ولا يخترع النظام رقماً.",
+                "Suggestions don't count until confirmed. Scores come from declared rules; the system never invents a number.",
+              )}
+            </p>
+          )}
+        </Card>
+      )}
+
+      <ExpandSection
+        title={tr("تقييم يدوي (احتياطي)", "Manual rating (fallback)")}
+        summary={tr("أدخل سلوكاً ومستوى ومثالاً ملموساً دون الذكاء الاصطناعي.", "Enter a behavior, level, and concrete example without AI.")}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="text-sm font-bold text-i500">{tr("السلوك", "Behavior")}</div>
+          <div className="flex flex-wrap gap-2">
+            {data.roleReqs.map((q) => (
+              <button key={q.id} type="button" className={chip(bid === q.id)} onClick={() => setBid(q.id)}>{bi(data.behaviors[q.id].name)}</button>
+            ))}
+          </div>
+          <div className="text-sm font-bold text-i500">{tr("المستوى", "Level")}</div>
+          <div className="flex flex-wrap gap-2">
+            {([25, 50, 75, 100] as const).map((l) => (
+              <button key={l} type="button" onClick={() => setLevel(l)} className={chip(level === l)}>
+                <LevelLabel level={l} />
+              </button>
+            ))}
+          </div>
+          <label className="flex flex-col gap-2 text-sm font-bold text-i500">{tr("مثال ملموس (مطلوب)", "A concrete example (required)")}
+            <textarea value={example} onChange={(ev) => setExample(ev.target.value)} rows={3} placeholder={tr("مثال: في اجتماع الأسبوع الماضي…", "For example: in last week's meeting…")} className="box-border h-[96px] w-full min-w-0 resize-none overflow-y-auto rounded-[12px] border border-i100 bg-white p-3 text-base font-normal text-i900 placeholder:text-i500" />
+          </label>
+          {error && <p role="alert" className="m-0 text-sm font-bold text-i900">{tr("أضف مثالاً ملموساً قبل الحفظ.", "Add a concrete example before saving.")}</p>}
+          {saved && <StatusBadge v="met" label={tr("تمت إضافة التقييم", "Rating saved")} />}
+          <Btn className="self-start" onClick={() => void submitManual()}>{tr("حفظ التقييم", "Save rating")}</Btn>
+        </div>
+      </ExpandSection>
     </>
   )
 }
@@ -932,14 +1236,16 @@ export function MyBehavior() {
       setPlanLoading(true)
       setPlanError(null)
       const res = await postJson<{
-        plan: PlanPayload
+        plan: PlanPayload | null
         saved: boolean
         source: string
-      }>("/api/plan", { slug: "ahmad", role_slug: "team-manager", language: lang }, { timeoutMs: 25_000 })
+      }>("/api/plan", { slug: "ahmad", role_slug: "team-manager", language: lang, force: false }, { timeoutMs: 12_000 })
       setPlanLoading(false)
-      if (res.ok) {
+      if (res.ok && res.data.plan?.items) {
         setPlanItems(res.data.plan.items)
-        setPlanSaved(Boolean(res.data.saved) || res.data.source === "seed")
+        setPlanSaved(Boolean(res.data.saved) || res.data.source === "seed" || res.data.source === "cache")
+      } else if (res.ok) {
+        setPlanItems(null)
       } else {
         setPlanError(res.error)
       }
@@ -950,7 +1256,6 @@ export function MyBehavior() {
     return (
       <>
         <PageTitle>{tr("عرضي", "My view")}</PageTitle>
-        <FlowStepper step="plan" />
         <Skeleton className="h-48" />
       </>
     )
@@ -967,11 +1272,18 @@ export function MyBehavior() {
   return (
     <>
       <PageTitle sub={tr("ملفك السلوكي كما تراه أنت، مع خطتك للنمو", "Your behavioral profile as you see it, with your growth plan")}>{tr("عرضي", "My view")}</PageTitle>
-      <FlowStepper step="plan" />
       <DataNotice error={data.error} />
       <div className="mb-6 grid gap-4 md:grid-cols-2">
         <Card className="flex flex-col gap-3 p-6"><div className="text-sm text-i500">{tr("تغطية الأدلة لدور مدير فريق", "Evidence coverage for team manager")}</div><ScoreCell value={`${m.rounded}%`} explain={explainReadiness(e)} size={56} /><p className="m-0 text-base leading-[1.7] text-i700">{tr("هذه إشارة جاهزية وليست توقعاً. القرار النهائي لمديرك.", "This is a readiness signal, not a prediction. The final decision is your manager's.")}</p></Card>
-        <Card className="flex flex-col gap-3 bg-ink p-6 text-white"><div className="text-sm text-mint">{tr("أولويتك الآن", "Your priority now")}</div><div className="text-xl font-bold">{bi(data.behaviors.delegation.name)}</div><div className="font-num text-[40px] font-extrabold leading-none">{m.parts[0].cur} → {m.parts[0].required}</div></Card>
+        <Card className="flex flex-col gap-3 bg-ink p-6 text-white">
+          <div className="text-sm text-mint">{tr("أولويتك الآن", "Your priority now")}</div>
+          <div className="text-xl font-bold">{bi(data.behaviors.delegation.name)}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-lg font-bold text-white">
+            <LevelLabel level={displayLevel(m.parts[0]?.cur ?? null, m.parts[0]?.level ?? null)} />
+            <span className="text-white/50" aria-hidden>→</span>
+            <LevelLabel level={m.parts[0]?.required ?? null} />
+          </div>
+        </Card>
       </div>
       <h2 className="m-0 mb-3 text-xl font-bold text-ink">{tr("سلوكياتي", "My behaviors")}</h2>
       <Card className="mb-8 flex flex-col gap-4 p-6">

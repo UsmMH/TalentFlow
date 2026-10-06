@@ -66,4 +66,19 @@ export const options = () => {
   return { list, saving: list[2].cost - list[0].cost, faster: list[2].weeks - list[0].weeks }
 }
 
-export const LEVEL_NAME = { 0: ["—", "—"], 25: ["مبتدئ", "Beginner"], 50: ["متوسط", "Intermediate"], 75: ["متقدم", "Advanced"], 100: ["خبير", "Expert"] } as const
+export const LEVEL_NAME = {
+  0: ["—", "—"],
+  25: ["مبتدئ", "Beginner"],
+  50: ["قيد التطوير", "Developing"],
+  75: ["متمكن", "Proficient"],
+  100: ["نموذجي", "Exemplary"],
+} as const
+
+export type LevelStep = keyof typeof LEVEL_NAME
+
+/** Snap a score onto a rubric step for display. Engine still uses raw numbers. */
+export function levelStep(level: number | null | undefined): LevelStep | null {
+  if (level === null || level === undefined || Number.isNaN(level)) return null
+  if (([0, 25, 50, 75, 100] as const).includes(level as LevelStep)) return level as LevelStep
+  return (Math.max(0, Math.min(100, Math.round(level / 25) * 25)) || 0) as LevelStep
+}

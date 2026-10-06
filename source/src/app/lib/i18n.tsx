@@ -18,7 +18,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const qs = new URLSearchParams(window.location.search)
   const [lang, setLang] = useState<Lang>(qs.get("lang") === "en" ? "en" : "ar")
   const [device, setDevice] = useState<"desktop" | "mobile">(qs.get("device") === "mobile" && !qs.has("embed") ? "mobile" : "desktop")
-  const [approved, setApproved] = useState(false)
+  const [approved, setApprovedState] = useState(() => {
+    try {
+      return sessionStorage.getItem("tf-demo-path-approved") === "1"
+    } catch {
+      return false
+    }
+  })
+  const setApproved = (v: boolean) => {
+    setApprovedState(v)
+    try {
+      if (v) sessionStorage.setItem("tf-demo-path-approved", "1")
+      else sessionStorage.removeItem("tf-demo-path-approved")
+    } catch {
+      /* ignore */
+    }
+  }
   useEffect(() => {
     document.documentElement.lang = lang
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr"

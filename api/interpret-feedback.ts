@@ -77,8 +77,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const llm = await chatJson<{ proposals?: InterpretProposal[] }>({
       messages,
       jsonSchema: INTERPRET_SCHEMA,
+      format: "json_object",
       timeoutMs: 25_000,
-      totalCapMs: 28_000,
+      totalCapMs: 45_000,
+      validate: (data) => {
+        const props = Array.isArray(data?.proposals) ? data.proposals : []
+        const usable = props.some(
+          (p) =>
+            p &&
+            typeof p === "object" &&
+            (Boolean((p as InterpretProposal).behavior_key) || Boolean((p as InterpretProposal).quote)),
+        )
+        return usable ? { ok: true } : { ok: false, error: "empty_proposals" }
+      },
     })
 
     if (!llm.ok) {
@@ -95,6 +106,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       saved_count: valid.length,
       dropped_count: dropped.length,
       drop_reasons: dropped.map((d) => d.reason),
+      dropped_keys: dropped.map((d) => d.behavior_key),
+      raw_keys: raw.slice(0, 8).map((p) => {
+        if (!p || typeof p !== "object") return { type: typeof p }
+        const row = p as Record<string, unknown>
+        return {
+          keys: Object.keys(row),
+          behavior_key: row.behavior_key,
+          level: row.level,
+          quote_len: typeof row.quote === "string" ? row.quote.length : 0,
+        }
+      }),
     })
 
     const idByKey = Object.fromEntries(behaviors.map((b) => [b.key, b.id]))

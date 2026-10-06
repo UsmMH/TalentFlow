@@ -4,7 +4,7 @@ import Shell, { DeviceToggle } from "./Shell"
 import { useApp } from "./lib/i18n"
 import { CandidateDetail, Chain, CreateRole, Decision, Overview, Ranking } from "./Manager"
 import { MyPlan, MyReadiness } from "./Employee"
-import { Analysis, BehaviorOverview, BehaviorProfile, MyBehavior, RateForm } from "./Behavior"
+import { Analysis, BehaviorOverview, BehaviorProfile, EmployeeFiles, MyBehavior, RateForm } from "./Behavior"
 
 /** Mobile preview = the same app in a 390px iframe, so real responsive CSS applies. */
 function PhonePreview() {
@@ -38,8 +38,9 @@ export default function App() {
         <Route path="roles/senior-data-analyst/chain" element={<Chain />} />
         <Route path="roles/senior-data-analyst/decision" element={<Decision />} />
         <Route path="behavior" element={<BehaviorOverview />} />
+        <Route path="behavior/files" element={<EmployeeFiles />} />
         <Route path="behavior/rate" element={<RateForm />} />
-        <Route path="behavior/ahmad/analysis" element={<Analysis />} />
+        <Route path="behavior/:id/analysis" element={<Analysis />} />
         <Route path="behavior/:id" element={<BehaviorProfile />} />
         <Route path="me/behavior" element={<MyBehavior />} />
         <Route path="me" element={<MyReadiness />} />

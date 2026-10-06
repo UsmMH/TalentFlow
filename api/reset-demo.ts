@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node"
+import { loadLocalEnv } from "./_lib/loadLocalEnv"
 import { getSupabaseAdmin } from "./_lib/supabaseAdmin"
 
 /** Seeded feedback_submissions ids from supabase/seed.sql — keep these, drop the rest. */
@@ -35,6 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return bad(res, 405, "Method not allowed")
   }
 
+  loadLocalEnv()
   if (process.env.ALLOW_DEMO_RESET !== "true") {
     return bad(res, 403, "Demo reset is disabled")
   }
