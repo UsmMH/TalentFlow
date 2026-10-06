@@ -6,6 +6,8 @@
   --latin: "Manrope", "Arial Narrow", sans-serif; --arabic: "IBM Plex Sans Arabic", "Manrope", sans-serif;
 }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body { margin: 0; background: var(--mist); font-family: var(--arabic); color: var(--ink); }
 html[lang="en"] body { font-family: var(--latin); }
 a { color: inherit; text-decoration: none; }
